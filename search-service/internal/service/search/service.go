@@ -151,6 +151,7 @@ outer:
 			}
 			nextSearchAfter = hit.Sort
 
+			_ = i
 			/*
 				if i >= len(authz.Allowed) || !authz.Allowed[i] {
 					continue
