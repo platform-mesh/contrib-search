@@ -94,6 +94,7 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (SearchResponse
 			return SearchResponse{}, err
 		}
 		if err := ValidateCursor(decoded, org, qHash, limit); err != nil {
+			log.Error().Err(err).Str("cursor", req.Cursor).Msg("invalid cursor")
 			return SearchResponse{}, err
 		}
 		searchAfter = decoded.SearchAfter
@@ -101,6 +102,7 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (SearchResponse
 
 	indexRef, err := s.resolver.ResolveIndex(ctx, org)
 	if err != nil {
+		log.Error().Err(err).Str("org", org).Msg("failed to resolve search index")
 		return SearchResponse{}, fmt.Errorf("%w: resolve search index: %v", ErrBackend, err)
 	}
 
@@ -121,6 +123,7 @@ outer:
 		page, err := s.searcher.Search(ctx, indexRef.IndexName, query, s.cfg.FetchBatchSize, searchAfter)
 		s.metrics.AddOpenSearchCalls(1)
 		if err != nil {
+			log.Error().Err(err).Msg("failed to query OpenSearch")
 			return SearchResponse{}, fmt.Errorf("%w: query OpenSearch: %v", ErrBackend, err)
 		}
 		if len(page.Hits) == 0 {
@@ -181,6 +184,7 @@ outer:
 			SearchAfter: nextSearchAfter,
 		})
 		if err != nil {
+			log.Error().Err(err).Msg("failed to encode cursor")
 			return SearchResponse{}, err
 		}
 		nextCursor = &cursor
