@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	openfgav1 "github.com/openfga/api/proto/openfga/v1"
-	"github.com/platform-mesh/golang-commons/fga/util"
 	"github.com/platform-mesh/golang-commons/logger"
 
 	"github.com/platform-mesh/search/internal/service/search"
@@ -132,7 +131,7 @@ func buildBatchCheckItem(user, relation string, index int, hit search.OpenSearch
 	}
 
 	tupleKey := &openfgav1.CheckRequestTupleKey{
-		User:     fmt.Sprintf("user:%s", user),
+		User:     fmt.Sprintf("user:%s", formatUser(user)),
 		Relation: relation,
 		Object:   ctx.object,
 	}
@@ -154,79 +153,32 @@ func buildAuthorizationContext(source map[string]interface{}) (authzContext, boo
 		return authzContext{}, false
 	}
 
-	kind := readString(source, "kind")
-	name := readString(source, "name")
-	namespace := readString(source, "namespace")
-	apiGroup := readString(source, "api_group")
-	clusterName := readString(source, "cluster_name")
-	organizationID := readString(source, "organization_id")
-	accountID := readString(source, "account_id")
-	accountName := readString(source, "account_name")
+	fgaObject := readString(source, "fga_object")
+	permissionsRaw, hasPermissions := source["permissions"].([]interface{})
 
-	resourceClusterID := clusterName
-	if resourceClusterID == "" {
-		resourceClusterID = firstNonEmpty(accountID, organizationID)
-	}
-
-	if kind == "" || name == "" || resourceClusterID == "" {
-		return authzContext{}, false
-	}
-
-	if namespace != "" {
-		if accountName == "" {
-			return authzContext{}, false
+	if fgaObject != "" {
+		tuples := make([]*openfgav1.TupleKey, 0)
+		if hasPermissions {
+			for _, p := range permissionsRaw {
+				m, ok := p.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				tuples = append(tuples, &openfgav1.TupleKey{
+					User:     readString(m, "user"),
+					Relation: readString(m, "relation"),
+					Object:   readString(m, "object"),
+				})
+			}
 		}
+		return authzContext{object: fgaObject, contextualTuples: tuples}, true
 	}
 
-	resourceType := util.ConvertToTypeName(apiGroup, kind)
-	object := fmt.Sprintf("%s:%s/%s", resourceType, resourceClusterID, name)
-	if namespace != "" {
-		object = fmt.Sprintf("%s:%s/%s/%s", resourceType, resourceClusterID, namespace, name)
-	}
-
-	accountClusterID := firstNonEmpty(accountID, organizationID, resourceClusterID)
-	accountObject := ""
-	if accountName != "" && accountClusterID != "" {
-		accountType := util.ConvertToTypeName("core.platform-mesh.io", "Account")
-		accountObject = fmt.Sprintf("%s:%s/%s", accountType, accountClusterID, accountName)
-	}
-
-	tuples := make([]*openfgav1.TupleKey, 0, 2)
-	resourceManaged := managedTuple(apiGroup, kind)
-
-	if namespace != "" && accountObject != "" {
-		namespaceType := util.ConvertToTypeName("", "Namespace")
-		namespaceObject := fmt.Sprintf("%s:%s/%s", namespaceType, resourceClusterID, namespace)
-
-		tuples = append(tuples, &openfgav1.TupleKey{
-			Object:   namespaceObject,
-			Relation: "parent",
-			User:     accountObject,
-		})
-
-		if !resourceManaged {
-			tuples = append(tuples, &openfgav1.TupleKey{
-				Object:   object,
-				Relation: "parent",
-				User:     namespaceObject,
-			})
-		}
-	} else if accountObject != "" && !resourceManaged {
-		tuples = append(tuples, &openfgav1.TupleKey{
-			Object:   object,
-			Relation: "parent",
-			User:     accountObject,
-		})
-	}
-
-	return authzContext{object: object, contextualTuples: tuples}, true
+	return authzContext{}, false
 }
 
-func managedTuple(group, kind string) bool {
-	if strings.EqualFold(group, "core.platform-mesh.io") && strings.EqualFold(kind, "Account") {
-		return true
-	}
-	return false
+func formatUser(user string) string {
+	return strings.ReplaceAll(user, ":", ".")
 }
 
 func readString(source map[string]interface{}, key string) string {
@@ -236,13 +188,4 @@ func readString(source map[string]interface{}, key string) string {
 	}
 	s, _ := v.(string)
 	return strings.TrimSpace(s)
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
 }

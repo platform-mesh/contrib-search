@@ -9,13 +9,14 @@ import (
 
 func TestBuildBatchCheckItemResourceObjectFormat(t *testing.T) {
 	hit := search.OpenSearchHit{Source: map[string]interface{}{
-		"kind":            "Component",
-		"name":            "my-component",
-		"namespace":       "dev",
-		"api_group":       "core.platform-mesh.io",
-		"organization_id": "orgcluster1",
-		"account_id":      "acccluster1",
-		"account_name":    "account-a",
+		"fga_object": "core_platform-mesh_io_component:cluster1/ns1/comp1",
+		"permissions": []interface{}{
+			map[string]interface{}{
+				"user":     "core_platform-mesh_io_account:sap/workspaces",
+				"relation": "parent",
+				"object":   "core_platform_mesh_io_namespace:cluster1/ns1",
+			},
+		},
 	}}
 
 	item, missing := buildBatchCheckItem("alice@example.com", "get", 0, hit)
@@ -25,7 +26,7 @@ func TestBuildBatchCheckItemResourceObjectFormat(t *testing.T) {
 	if item.TupleKey.Relation != "get" {
 		t.Fatalf("unexpected relation: %s", item.TupleKey.Relation)
 	}
-	expected := "core_platform-mesh_io_component:acccluster1/dev/my-component"
+	expected := "core_platform-mesh_io_component:cluster1/ns1/comp1"
 	if item.TupleKey.Object != expected {
 		t.Fatalf("unexpected object: %s", item.TupleKey.Object)
 	}
@@ -36,12 +37,8 @@ func TestBuildBatchCheckItemResourceObjectFormat(t *testing.T) {
 
 func TestBuildBatchCheckItemDropsMissingAuthContext(t *testing.T) {
 	hit := search.OpenSearchHit{Source: map[string]interface{}{
-		"kind":            "Component",
-		"name":            "my-component",
-		"namespace":       "dev",
-		"api_group":       "core.platform-mesh.io",
-		"organization_id": "orgcluster1",
-		// account_name intentionally missing for namespaced resources
+		// missing fga_object
+		"kind": "Component",
 	}}
 
 	_, missing := buildBatchCheckItem("alice@example.com", "get", 0, hit)
@@ -93,60 +90,57 @@ func TestChunkRanges(t *testing.T) {
 	}
 }
 
-func TestBuildAuthorizationContextUsesClusterNameAsResourceClusterID(t *testing.T) {
-	source := map[string]interface{}{
-		"kind":            "Component",
-		"name":            "my-component",
-		"namespace":       "dev",
-		"api_group":       "core.platform-mesh.io",
-		"cluster_name":    "gencluster99",  // GeneratedClusterId of the resource workspace
-		"organization_id": "orgcluster1",
-		"account_id":      "acccluster1",   // OriginClusterId (parent workspace)
-		"account_name":    "account-a",
+func TestFormatUser(t *testing.T) {
+	tests := []struct {
+		user string
+		want string
+	}{
+		{"alice", "alice"},
+		{"system:serviceaccount:default:auth", "system.serviceaccount.default.auth"},
 	}
-
-	ctx, ok := buildAuthorizationContext(source)
-	if !ok {
-		t.Fatalf("expected valid authorization context")
-	}
-
-	// Resource object must use cluster_name (gencluster99), not account_id
-	expectedObject := "core_platform-mesh_io_component:gencluster99/dev/my-component"
-	if ctx.object != expectedObject {
-		t.Fatalf("expected object %q, got %q", expectedObject, ctx.object)
-	}
-
-	// Namespace tuple must also use cluster_name for the namespace object
-	if len(ctx.contextualTuples) == 0 {
-		t.Fatalf("expected contextual tuples")
-	}
-	nsTuple := ctx.contextualTuples[0]
-	expectedNS := "core_namespace:gencluster99/dev"
-	if nsTuple.Object != expectedNS {
-		t.Fatalf("expected namespace object %q, got %q", expectedNS, nsTuple.Object)
-	}
-	// Account tuple must use account_id (acccluster1), not cluster_name
-	expectedAccount := "core_platform-mesh_io_account:acccluster1/account-a"
-	if nsTuple.User != expectedAccount {
-		t.Fatalf("expected account user %q, got %q", expectedAccount, nsTuple.User)
+	for _, tt := range tests {
+		if got := formatUser(tt.user); got != tt.want {
+			t.Errorf("formatUser(%q) = %q, want %q", tt.user, got, tt.want)
+		}
 	}
 }
 
-func TestBuildAuthorizationContextClusterScopedResource(t *testing.T) {
+func TestBuildAuthorizationContextFromDocumentMetadata(t *testing.T) {
 	source := map[string]interface{}{
-		"kind":            "Account",
-		"name":            "account-a",
-		"api_group":       "core.platform-mesh.io",
-		"cluster_name":    "orgcluster1",
-		"organization_id": "orgcluster1",
+		"fga_object": "core_platform-mesh_io_component:cluster-x/ns-y/comp-z",
+		"permissions": []interface{}{
+			map[string]interface{}{
+				"user":     "core_platform_mesh_io_account:sap/workspaces",
+				"relation": "parent",
+				"object":   "core_platform_mesh_io_namespace:cluster-x/ns-y",
+			},
+		},
 	}
 
 	ctx, ok := buildAuthorizationContext(source)
 	if !ok {
-		t.Fatalf("expected valid authorization context")
+		t.Fatalf("expected valid context")
 	}
-	expectedObject := "core_platform-mesh_io_account:orgcluster1/account-a"
-	if ctx.object != expectedObject {
-		t.Fatalf("expected object %q, got %q", expectedObject, ctx.object)
+
+	if ctx.object != source["fga_object"] {
+		t.Errorf("expected object %q, got %q", source["fga_object"], ctx.object)
+	}
+}
+
+func TestBuildAuthorizationContextFromDocumentMetadataNoPermissions(t *testing.T) {
+	source := map[string]interface{}{
+		"fga_object": "core_platform_mesh_io_workspace:cluster-x/work-y",
+	}
+
+	ctx, ok := buildAuthorizationContext(source)
+	if !ok {
+		t.Fatalf("expected valid context")
+	}
+
+	if ctx.object != "core_platform_mesh_io_workspace:cluster-x/work-y" {
+		t.Errorf("unexpected object: %s", ctx.object)
+	}
+	if len(ctx.contextualTuples) != 0 {
+		t.Errorf("expected 0 tuples, got %d", len(ctx.contextualTuples))
 	}
 }
