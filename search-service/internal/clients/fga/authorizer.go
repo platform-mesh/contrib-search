@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	openfgav1 "github.com/openfga/api/proto/openfga/v1"
-	"github.com/platform-mesh/golang-commons/fga/helpers"
 	"github.com/platform-mesh/golang-commons/fga/util"
+	"github.com/platform-mesh/golang-commons/logger"
 
 	"github.com/platform-mesh/search/internal/service/search"
 )
@@ -23,13 +23,20 @@ func NewAuthorizer(client openfgav1.OpenFGAServiceClient) *Authorizer {
 }
 
 func (a *Authorizer) FilterAuthorized(ctx context.Context, req search.AuthorizationRequest) (search.AuthorizationResult, error) {
+	log := logger.LoadLoggerFromContext(ctx)
 	allowed := make([]bool, len(req.Hits))
 	if len(req.Hits) == 0 {
 		return search.AuthorizationResult{Allowed: allowed}, nil
 	}
 
-	storeID, err := helpers.GetStoreIDForTenant(ctx, a.client, req.Organization)
+	storeID, err := a.resolveStoreID(ctx, req.Organization)
 	if err != nil {
+		log.Error().
+			Err(err).
+			Str("organization", req.Organization).
+			Str("user", req.User).
+			Int("hits", len(req.Hits)).
+			Msg("failed to resolve OpenFGA store ID")
 		return search.AuthorizationResult{}, fmt.Errorf("resolve store ID: %w", err)
 	}
 
@@ -60,6 +67,13 @@ func (a *Authorizer) FilterAuthorized(ctx context.Context, req search.Authorizat
 			Checks:  items,
 		})
 		if err != nil {
+			log.Error().
+				Err(err).
+				Str("organization", req.Organization).
+				Str("storeID", storeID).
+				Str("user", req.User).
+				Int("checks", len(items)).
+				Msg("OpenFGA BatchCheck failed")
 			return search.AuthorizationResult{}, fmt.Errorf("openfga batch check: %w", err)
 		}
 		result.Calls++
@@ -79,6 +93,19 @@ func (a *Authorizer) FilterAuthorized(ctx context.Context, req search.Authorizat
 	}
 
 	return result, nil
+}
+
+func (a *Authorizer) resolveStoreID(ctx context.Context, org string) (string, error) {
+	res, err := a.client.ListStores(ctx, &openfgav1.ListStoresRequest{})
+	if err != nil {
+		return "", fmt.Errorf("list stores: %w", err)
+	}
+	for _, store := range res.GetStores() {
+		if strings.TrimSpace(store.GetName()) == org {
+			return store.GetId(), nil
+		}
+	}
+	return "", fmt.Errorf("no OpenFGA store found for organization %q", org)
 }
 
 func chunkRanges(total, chunkSize int) [][2]int {
@@ -136,12 +163,12 @@ func buildAuthorizationContext(source map[string]interface{}) (authzContext, boo
 	accountID := readString(source, "account_id")
 	accountName := readString(source, "account_name")
 
-	clusterID := firstNonEmpty(accountID, organizationID)
-	if clusterID == "" && !strings.Contains(clusterName, ":") {
-		clusterID = clusterName
+	resourceClusterID := clusterName
+	if resourceClusterID == "" {
+		resourceClusterID = firstNonEmpty(accountID, organizationID)
 	}
 
-	if kind == "" || name == "" || clusterID == "" {
+	if kind == "" || name == "" || resourceClusterID == "" {
 		return authzContext{}, false
 	}
 
@@ -149,22 +176,19 @@ func buildAuthorizationContext(source map[string]interface{}) (authzContext, boo
 		if accountName == "" {
 			return authzContext{}, false
 		}
-		if firstNonEmpty(accountID, organizationID, clusterID) == "" {
-			return authzContext{}, false
-		}
 	}
 
 	resourceType := util.ConvertToTypeName(apiGroup, kind)
-	object := fmt.Sprintf("%s:%s/%s", resourceType, clusterID, name)
+	object := fmt.Sprintf("%s:%s/%s", resourceType, resourceClusterID, name)
 	if namespace != "" {
-		object = fmt.Sprintf("%s:%s/%s/%s", resourceType, clusterID, namespace, name)
+		object = fmt.Sprintf("%s:%s/%s/%s", resourceType, resourceClusterID, namespace, name)
 	}
 
-	parentAccountCluster := firstNonEmpty(accountID, organizationID, clusterID)
+	accountClusterID := firstNonEmpty(accountID, organizationID, resourceClusterID)
 	accountObject := ""
-	if accountName != "" && parentAccountCluster != "" {
+	if accountName != "" && accountClusterID != "" {
 		accountType := util.ConvertToTypeName("core.platform-mesh.io", "Account")
-		accountObject = fmt.Sprintf("%s:%s/%s", accountType, parentAccountCluster, accountName)
+		accountObject = fmt.Sprintf("%s:%s/%s", accountType, accountClusterID, accountName)
 	}
 
 	tuples := make([]*openfgav1.TupleKey, 0, 2)
@@ -172,7 +196,7 @@ func buildAuthorizationContext(source map[string]interface{}) (authzContext, boo
 
 	if namespace != "" && accountObject != "" {
 		namespaceType := util.ConvertToTypeName("", "Namespace")
-		namespaceObject := fmt.Sprintf("%s:%s/%s", namespaceType, clusterID, namespace)
+		namespaceObject := fmt.Sprintf("%s:%s/%s", namespaceType, resourceClusterID, namespace)
 
 		tuples = append(tuples, &openfgav1.TupleKey{
 			Object:   namespaceObject,

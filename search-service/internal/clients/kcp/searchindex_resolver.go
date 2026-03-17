@@ -70,8 +70,7 @@ func (r *SearchIndexResolver) ResolveIndex(ctx context.Context, org string) (sea
 	if err != nil {
 		return search.SearchIndexRef{}, fmt.Errorf("list SearchIndex resources: %w", err)
 	}
-	// Backward-compatible fallback for SearchIndex resources created before
-	// org-cluster-id labels were introduced.
+
 	if len(list.Items) == 0 {
 		list, err = r.listSearchIndices(ctx, "")
 		if err != nil {

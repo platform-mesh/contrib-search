@@ -92,3 +92,61 @@ func TestChunkRanges(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildAuthorizationContextUsesClusterNameAsResourceClusterID(t *testing.T) {
+	source := map[string]interface{}{
+		"kind":            "Component",
+		"name":            "my-component",
+		"namespace":       "dev",
+		"api_group":       "core.platform-mesh.io",
+		"cluster_name":    "gencluster99",  // GeneratedClusterId of the resource workspace
+		"organization_id": "orgcluster1",
+		"account_id":      "acccluster1",   // OriginClusterId (parent workspace)
+		"account_name":    "account-a",
+	}
+
+	ctx, ok := buildAuthorizationContext(source)
+	if !ok {
+		t.Fatalf("expected valid authorization context")
+	}
+
+	// Resource object must use cluster_name (gencluster99), not account_id
+	expectedObject := "core_platform-mesh_io_component:gencluster99/dev/my-component"
+	if ctx.object != expectedObject {
+		t.Fatalf("expected object %q, got %q", expectedObject, ctx.object)
+	}
+
+	// Namespace tuple must also use cluster_name for the namespace object
+	if len(ctx.contextualTuples) == 0 {
+		t.Fatalf("expected contextual tuples")
+	}
+	nsTuple := ctx.contextualTuples[0]
+	expectedNS := "core_namespace:gencluster99/dev"
+	if nsTuple.Object != expectedNS {
+		t.Fatalf("expected namespace object %q, got %q", expectedNS, nsTuple.Object)
+	}
+	// Account tuple must use account_id (acccluster1), not cluster_name
+	expectedAccount := "core_platform-mesh_io_account:acccluster1/account-a"
+	if nsTuple.User != expectedAccount {
+		t.Fatalf("expected account user %q, got %q", expectedAccount, nsTuple.User)
+	}
+}
+
+func TestBuildAuthorizationContextClusterScopedResource(t *testing.T) {
+	source := map[string]interface{}{
+		"kind":            "Account",
+		"name":            "account-a",
+		"api_group":       "core.platform-mesh.io",
+		"cluster_name":    "orgcluster1",
+		"organization_id": "orgcluster1",
+	}
+
+	ctx, ok := buildAuthorizationContext(source)
+	if !ok {
+		t.Fatalf("expected valid authorization context")
+	}
+	expectedObject := "core_platform-mesh_io_account:orgcluster1/account-a"
+	if ctx.object != expectedObject {
+		t.Fatalf("expected object %q, got %q", expectedObject, ctx.object)
+	}
+}

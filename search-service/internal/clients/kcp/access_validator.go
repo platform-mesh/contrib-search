@@ -51,6 +51,11 @@ func (v *OrgAccessValidator) ValidateTokenForOrg(ctx context.Context, authHeader
 
 	resp, err := v.http.Do(req)
 	if err != nil {
+		v.log.Error().
+			Err(err).
+			Str("organization", org).
+			Str("clusterPath", clusterPath).
+			Msg("KCP org token validation request failed")
 		return false, fmt.Errorf("execute KCP auth request: %w", err)
 	}
 	defer resp.Body.Close() //nolint:errcheck

@@ -131,20 +131,25 @@ outer:
 			break
 		}
 
-		/*
-			authz, err := s.authorizer.FilterAuthorized(ctx, AuthorizationRequest{
-				Organization: org,
-				User:         user,
-				Relation:     "get",
-				Hits:         page.Hits,
-			})
-			if err != nil {
-				return SearchResponse{}, fmt.Errorf("%w: filter authorization: %v", ErrBackend, err)
-			}
-			s.metrics.AddOpenFGACalls(authz.Calls)
-			s.metrics.AddDroppedMissingContext(authz.DroppedMissingContext)
-			s.metrics.AddAuthDenied(authz.Denied)
-		*/
+		authz, err := s.authorizer.FilterAuthorized(ctx, AuthorizationRequest{
+			Organization: org,
+			User:         user,
+			Relation:     "get",
+			Hits:         page.Hits,
+		})
+		if err != nil {
+			log.Error().
+				Err(err).
+				Str("organization", org).
+				Str("queryHash", qHash).
+				Str("index", indexRef.IndexName).
+				Int("scannedHits", totalScanned).
+				Msg("failed to authorize search hits with OpenFGA")
+			return SearchResponse{}, fmt.Errorf("%w: filter authorization: %v", ErrBackend, err)
+		}
+		s.metrics.AddOpenFGACalls(authz.Calls)
+		s.metrics.AddDroppedMissingContext(authz.DroppedMissingContext)
+		s.metrics.AddAuthDenied(authz.Denied)
 
 		for i, hit := range page.Hits {
 			totalScanned++
@@ -154,12 +159,10 @@ outer:
 			}
 			nextSearchAfter = hit.Sort
 
-			_ = i
-			/*
-				if i >= len(authz.Allowed) || !authz.Allowed[i] {
-					continue
-				}
-			*/
+			if i >= len(authz.Allowed) || !authz.Allowed[i] {
+				log.Warn().Str("organization", org).Str("queryHash", qHash).Str("index", indexRef.IndexName).Int("hitIndex", i).Msg("skipping unauthorized search hit")
+				continue
+			}
 
 			results = append(results, mapHit(hit))
 			if len(results) == limit {

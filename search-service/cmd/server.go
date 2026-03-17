@@ -66,6 +66,12 @@ var serverCmd = &cobra.Command{
 		if err != nil {
 			log.Fatal().Err(err).Msg("failed to create OpenFGA client")
 		}
+		log.Info().
+			Str("openSearchURL", serviceCfg.OpenSearch.URL).
+			Str("openFGAGRPCAddr", serviceCfg.OpenFGA.GRPCAddr).
+			Str("searchIndexWorkspacePath", serviceCfg.SearchIndex.WorkspacePath).
+			Str("searchIndexGVR", fmt.Sprintf("%s/%s/%s", serviceCfg.SearchIndex.Group, serviceCfg.SearchIndex.Version, serviceCfg.SearchIndex.Resource)).
+			Msg("search service backend configuration")
 
 		metrics := observability.NewMetrics()
 		svc := searchservice.NewService(

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	pmcontext "github.com/platform-mesh/golang-commons/context"
+	"github.com/platform-mesh/golang-commons/logger"
 
 	appcontext "github.com/platform-mesh/search/internal/context"
 	"github.com/platform-mesh/search/internal/service/search"
@@ -39,6 +40,7 @@ func (m *OrgContextMiddleware) SetRequestContext() func(http.Handler) http.Handl
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
+			log := logger.LoadLoggerFromContext(ctx)
 
 			org := extractSubdomain(r.Host)
 			if org == "" {
@@ -70,6 +72,10 @@ func (m *OrgContextMiddleware) SetRequestContext() func(http.Handler) http.Handl
 
 				allowed, err := m.validator.ValidateTokenForOrg(ctx, authHeader, org)
 				if err != nil {
+					log.Error().
+						Err(err).
+						Str("organization", org).
+						Msg("failed to validate token for org access")
 					http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 					return
 				}
