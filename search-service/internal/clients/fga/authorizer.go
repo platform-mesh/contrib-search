@@ -34,10 +34,16 @@ func (a *Authorizer) FilterAuthorized(ctx context.Context, req search.Authorizat
 			Err(err).
 			Str("organization", req.Organization).
 			Str("user", req.User).
-			Int("hits", len(req.Hits)).
 			Msg("failed to resolve OpenFGA store ID")
 		return search.AuthorizationResult{}, fmt.Errorf("resolve store ID: %w", err)
 	}
+
+	log.Debug().
+		Str("organization", req.Organization).
+		Str("storeID", storeID).
+		Str("user", req.User).
+		Int("hits", len(req.Hits)).
+		Msg("resolved OpenFGA store for authorization")
 
 	result := search.AuthorizationResult{Allowed: allowed}
 
@@ -48,7 +54,7 @@ func (a *Authorizer) FilterAuthorized(ctx context.Context, req search.Authorizat
 		indicesByCorrelation := make(map[string]int, end-start)
 
 		for idx := start; idx < end; idx++ {
-			item, missingContext := buildBatchCheckItem(req.User, req.Relation, idx, req.Hits[idx])
+			item, missingContext := buildBatchCheckItem(log, req.User, req.Relation, idx, req.Hits[idx])
 			if missingContext {
 				result.DroppedMissingContext++
 				continue
@@ -124,8 +130,8 @@ func chunkRanges(total, chunkSize int) [][2]int {
 	return ranges
 }
 
-func buildBatchCheckItem(user, relation string, index int, hit search.OpenSearchHit) (*openfgav1.BatchCheckItem, bool) {
-	ctx, ok := buildAuthorizationContext(hit.Source)
+func buildBatchCheckItem(log *logger.Logger, user, relation string, index int, hit search.OpenSearchHit) (*openfgav1.BatchCheckItem, bool) {
+	ctx, ok := buildAuthorizationContext(log, hit.Source)
 	if !ok {
 		return nil, true
 	}
@@ -135,6 +141,14 @@ func buildBatchCheckItem(user, relation string, index int, hit search.OpenSearch
 		Relation: relation,
 		Object:   ctx.object,
 	}
+
+	log.Debug().
+		Int("hitIndex", index).
+		Str("user", tupleKey.User).
+		Str("relation", tupleKey.Relation).
+		Str("object", tupleKey.Object).
+		Interface("contextualTuples", ctx.contextualTuples).
+		Msg("building FGA BatchCheck item")
 
 	return &openfgav1.BatchCheckItem{
 		TupleKey:         tupleKey,
@@ -148,8 +162,9 @@ type authzContext struct {
 	contextualTuples []*openfgav1.TupleKey
 }
 
-func buildAuthorizationContext(source map[string]interface{}) (authzContext, bool) {
+func buildAuthorizationContext(log *logger.Logger, source map[string]interface{}) (authzContext, bool) {
 	if source == nil {
+		log.Debug().Msg("authz context build failed: source is nil")
 		return authzContext{}, false
 	}
 

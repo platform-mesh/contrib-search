@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/platform-mesh/golang-commons/logger/testlogger"
+
 	"github.com/platform-mesh/search/internal/service/search"
 )
 
@@ -19,7 +21,9 @@ func TestBuildBatchCheckItemResourceObjectFormat(t *testing.T) {
 		},
 	}}
 
-	item, missing := buildBatchCheckItem("alice@example.com", "get", 0, hit)
+	testlogger := testlogger.New().HideLogOutput()
+
+	item, missing := buildBatchCheckItem(testlogger.Logger, "alice@example.com", "get", 0, hit)
 	if missing {
 		t.Fatalf("expected context to be valid")
 	}
@@ -41,7 +45,9 @@ func TestBuildBatchCheckItemDropsMissingAuthContext(t *testing.T) {
 		"kind": "Component",
 	}}
 
-	_, missing := buildBatchCheckItem("alice@example.com", "get", 0, hit)
+	testlogger := testlogger.New().HideLogOutput()
+
+	_, missing := buildBatchCheckItem(testlogger.Logger, "alice@example.com", "get", 0, hit)
 	if !missing {
 		t.Fatalf("expected missing auth context")
 	}
@@ -117,7 +123,7 @@ func TestBuildAuthorizationContextFromDocumentMetadata(t *testing.T) {
 		},
 	}
 
-	ctx, ok := buildAuthorizationContext(source)
+	ctx, ok := buildAuthorizationContext(nil, source)
 	if !ok {
 		t.Fatalf("expected valid context")
 	}
@@ -132,7 +138,9 @@ func TestBuildAuthorizationContextFromDocumentMetadataNoPermissions(t *testing.T
 		"fga_object": "core_platform_mesh_io_workspace:cluster-x/work-y",
 	}
 
-	ctx, ok := buildAuthorizationContext(source)
+	testlogger := testlogger.New().HideLogOutput()
+
+	ctx, ok := buildAuthorizationContext(testlogger.Logger, source)
 	if !ok {
 		t.Fatalf("expected valid context")
 	}
