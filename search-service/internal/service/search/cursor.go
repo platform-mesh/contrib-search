@@ -12,6 +12,8 @@ type CursorState struct {
 	Version     int           `json:"v"`
 	Org         string        `json:"org"`
 	QueryHash   string        `json:"qh"`
+	Resource    string        `json:"r,omitempty"`
+	FiltersHash string        `json:"fh,omitempty"`
 	Limit       int           `json:"l"`
 	SearchAfter []interface{} `json:"sa"`
 }
@@ -52,12 +54,18 @@ func DecodeCursor(token string) (CursorState, error) {
 	return state, nil
 }
 
-func ValidateCursor(state CursorState, org, qHash string, limit int) error {
+func ValidateCursor(state CursorState, org, qHash, resource, fHash string, limit int) error {
 	if state.Org != org {
 		return fmt.Errorf("%w: org mismatch", ErrInvalidCursor)
 	}
 	if state.QueryHash != qHash {
 		return fmt.Errorf("%w: query mismatch", ErrInvalidCursor)
+	}
+	if state.Resource != resource {
+		return fmt.Errorf("%w: resource mismatch", ErrInvalidCursor)
+	}
+	if state.FiltersHash != fHash {
+		return fmt.Errorf("%w: filters mismatch", ErrInvalidCursor)
 	}
 	if state.Limit != limit {
 		return fmt.Errorf("%w: limit mismatch", ErrInvalidCursor)

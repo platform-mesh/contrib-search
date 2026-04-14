@@ -18,11 +18,29 @@ type fakeSearchService struct {
 	response search.SearchResponse
 	err      error
 	lastReq  search.SearchRequest
+
+	resourcesResp search.SearchResourcesResponse
+	resourcesErr  error
+	lastResReq    search.SearchResourcesRequest
+
+	filterValuesResp search.FilterValuesResponse
+	filterValuesErr  error
+	lastFilterReq    search.FilterValuesRequest
 }
 
 func (f *fakeSearchService) Search(ctx context.Context, req search.SearchRequest) (search.SearchResponse, error) {
 	f.lastReq = req
 	return f.response, f.err
+}
+
+func (f *fakeSearchService) ListResources(ctx context.Context, req search.SearchResourcesRequest) (search.SearchResourcesResponse, error) {
+	f.lastResReq = req
+	return f.resourcesResp, f.resourcesErr
+}
+
+func (f *fakeSearchService) FilterValues(ctx context.Context, req search.FilterValuesRequest) (search.FilterValuesResponse, error) {
+	f.lastFilterReq = req
+	return f.filterValuesResp, f.filterValuesErr
 }
 
 func withRequestContext(rc appcontext.RequestContext) func(http.Handler) http.Handler {
@@ -37,7 +55,7 @@ func TestCreateRouterSearchSuccess(t *testing.T) {
 	svc := &fakeSearchService{response: search.SearchResponse{Results: []search.SearchHit{{ID: "1", Score: 1, Source: map[string]interface{}{"id": "1"}}}}}
 	r := CreateRouter(svc, []func(http.Handler) http.Handler{withRequestContext(appcontext.RequestContext{Organization: "acme", User: "alice@example.com"})})
 
-	req := httptest.NewRequest(http.MethodGet, "/rest/v1/search?q=hello&limit=15&cursor=abc", nil)
+	req := httptest.NewRequest(http.MethodGet, "/rest/v1/search?q=hello&limit=15&cursor=abc&resource=accounts&filter.status=Ready", nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 
@@ -47,8 +65,11 @@ func TestCreateRouterSearchSuccess(t *testing.T) {
 	if svc.lastReq.Organization != "acme" || svc.lastReq.User != "alice@example.com" {
 		t.Fatalf("unexpected request context: %+v", svc.lastReq)
 	}
-	if svc.lastReq.Query != "hello" || svc.lastReq.Limit != 15 || svc.lastReq.Cursor != "abc" {
+	if svc.lastReq.Query != "hello" || svc.lastReq.Limit != 15 || svc.lastReq.Cursor != "abc" || svc.lastReq.Resource != "accounts" {
 		t.Fatalf("unexpected request payload: %+v", svc.lastReq)
+	}
+	if len(svc.lastReq.Filters["status"]) != 1 || svc.lastReq.Filters["status"][0] != "Ready" {
+		t.Fatalf("unexpected filters: %+v", svc.lastReq.Filters)
 	}
 
 	var payload search.SearchResponse
@@ -133,6 +154,50 @@ func TestCreateRouterInvalidLimit(t *testing.T) {
 	r.ServeHTTP(rr, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+}
+
+func TestCreateRouterResourcesEndpoint(t *testing.T) {
+	svc := &fakeSearchService{
+		resourcesResp: search.SearchResourcesResponse{
+			Resources: []search.SearchResource{
+				{Resource: "accounts", DefaultFields: []string{"name"}},
+			},
+		},
+	}
+	r := CreateRouter(svc, []func(http.Handler) http.Handler{withRequestContext(appcontext.RequestContext{Organization: "acme", User: "alice@example.com"})})
+	req := httptest.NewRequest(http.MethodGet, "/rest/v1/search/resources", nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if svc.lastResReq.Organization != "acme" {
+		t.Fatalf("unexpected request: %+v", svc.lastResReq)
+	}
+}
+
+func TestCreateRouterFilterValuesEndpoint(t *testing.T) {
+	svc := &fakeSearchService{
+		filterValuesResp: search.FilterValuesResponse{Values: []string{"Ready", "Pending"}},
+	}
+	r := CreateRouter(svc, []func(http.Handler) http.Handler{withRequestContext(appcontext.RequestContext{Organization: "acme", User: "alice@example.com"})})
+	req := httptest.NewRequest(http.MethodGet, "/rest/v1/search/filter-values?resource=accounts&field=status&q=foo&filter.type=premium", nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if svc.lastFilterReq.Organization != "acme" || svc.lastFilterReq.User != "alice@example.com" {
+		t.Fatalf("unexpected request context: %+v", svc.lastFilterReq)
+	}
+	if svc.lastFilterReq.Resource != "accounts" || svc.lastFilterReq.Field != "status" {
+		t.Fatalf("unexpected request payload: %+v", svc.lastFilterReq)
+	}
+	if len(svc.lastFilterReq.Filters["type"]) != 1 || svc.lastFilterReq.Filters["type"][0] != "premium" {
+		t.Fatalf("unexpected filters: %+v", svc.lastFilterReq.Filters)
 	}
 }
 

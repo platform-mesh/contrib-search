@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -17,6 +18,8 @@ import (
 
 type SearchService interface {
 	Search(ctx context.Context, req search.SearchRequest) (search.SearchResponse, error)
+	ListResources(ctx context.Context, req search.SearchResourcesRequest) (search.SearchResourcesResponse, error)
+	FilterValues(ctx context.Context, req search.FilterValuesRequest) (search.FilterValuesResponse, error)
 }
 
 func CreateRouter(svc SearchService, mws []func(http.Handler) http.Handler) *chi.Mux {
@@ -37,21 +40,24 @@ func CreateRouter(svc SearchService, mws []func(http.Handler) http.Handler) *chi
 		}
 
 		q := strings.TrimSpace(r.URL.Query().Get("q"))
-		limit := 0
-		limitRaw := strings.TrimSpace(r.URL.Query().Get("limit"))
-		if limitRaw != "" {
-			parsed, err := strconv.Atoi(limitRaw)
-			if err != nil {
-				http.Error(w, "invalid limit", http.StatusBadRequest)
-				return
-			}
-			limit = parsed
+		limit, err := parseOptionalLimit(r.URL.Query().Get("limit"))
+		if err != nil {
+			http.Error(w, "invalid limit", http.StatusBadRequest)
+			return
+		}
+
+		filters, err := parseFilters(r.URL.Query())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
 		}
 
 		resp, err := svc.Search(r.Context(), search.SearchRequest{
 			Organization: rc.Organization,
 			User:         rc.User,
 			Query:        q,
+			Resource:     strings.TrimSpace(r.URL.Query().Get("resource")),
+			Filters:      filters,
 			Limit:        limit,
 			Cursor:       strings.TrimSpace(r.URL.Query().Get("cursor")),
 		})
@@ -85,5 +91,122 @@ func CreateRouter(svc SearchService, mws []func(http.Handler) http.Handler) *chi
 		_ = json.NewEncoder(w).Encode(resp)
 	})
 
+	router.With(mws...).Get("/rest/v1/search/resources", func(w http.ResponseWriter, r *http.Request) {
+		rc, err := appcontext.GetRequestContext(r.Context())
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+			return
+		}
+
+		resp, err := svc.ListResources(r.Context(), search.SearchResourcesRequest{
+			Organization: rc.Organization,
+		})
+		if err != nil {
+			handleError(w, r, rc, err)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
+	router.With(mws...).Get("/rest/v1/search/filter-values", func(w http.ResponseWriter, r *http.Request) {
+		rc, err := appcontext.GetRequestContext(r.Context())
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+			return
+		}
+
+		limit, err := parseOptionalLimit(r.URL.Query().Get("limit"))
+		if err != nil {
+			http.Error(w, "invalid limit", http.StatusBadRequest)
+			return
+		}
+
+		filters, err := parseFilters(r.URL.Query())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		resp, err := svc.FilterValues(r.Context(), search.FilterValuesRequest{
+			Organization: rc.Organization,
+			User:         rc.User,
+			Resource:     strings.TrimSpace(r.URL.Query().Get("resource")),
+			Field:        strings.TrimSpace(r.URL.Query().Get("field")),
+			Query:        strings.TrimSpace(r.URL.Query().Get("q")),
+			Filters:      filters,
+			Limit:        limit,
+		})
+		if err != nil {
+			handleError(w, r, rc, err)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
 	return router
+}
+
+func parseOptionalLimit(raw string) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, nil
+	}
+	return strconv.Atoi(raw)
+}
+
+func parseFilters(values map[string][]string) (map[string][]string, error) {
+	filters := make(map[string][]string)
+	for key, entries := range values {
+		if !strings.HasPrefix(key, "filter.") {
+			continue
+		}
+
+		field := strings.TrimSpace(strings.TrimPrefix(key, "filter."))
+		if field == "" {
+			return nil, fmt.Errorf("invalid filter field")
+		}
+
+		for _, entry := range entries {
+			entry = strings.TrimSpace(entry)
+			if entry == "" {
+				continue
+			}
+			filters[field] = append(filters[field], entry)
+		}
+	}
+
+	if len(filters) == 0 {
+		return nil, nil
+	}
+	return filters, nil
+}
+
+func handleError(w http.ResponseWriter, r *http.Request, rc appcontext.RequestContext, err error) {
+	log := logger.LoadLoggerFromContext(r.Context())
+	status := http.StatusInternalServerError
+	switch {
+	case errors.Is(err, search.ErrInvalidRequest), errors.Is(err, search.ErrInvalidCursor):
+		status = http.StatusBadRequest
+		http.Error(w, err.Error(), status)
+	case errors.Is(err, search.ErrUnauthorized):
+		status = http.StatusUnauthorized
+		http.Error(w, http.StatusText(status), status)
+	case errors.Is(err, search.ErrForbidden):
+		status = http.StatusForbidden
+		http.Error(w, http.StatusText(status), status)
+	default:
+		http.Error(w, http.StatusText(status), status)
+	}
+	log.Error().
+		Err(err).
+		Str("path", r.URL.Path).
+		Str("organization", rc.Organization).
+		Int("statusCode", status).
+		Msg("search request failed")
 }

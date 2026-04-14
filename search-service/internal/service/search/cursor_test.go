@@ -31,13 +31,13 @@ func TestCursorRoundTrip(t *testing.T) {
 
 func TestValidateCursorMismatch(t *testing.T) {
 	state := CursorState{Version: cursorVersion, Org: "acme", QueryHash: queryHash("foo"), Limit: 20, SearchAfter: []interface{}{1.0, "x"}}
-	if err := ValidateCursor(state, "other", queryHash("foo"), 20); err == nil {
+	if err := ValidateCursor(state, "other", queryHash("foo"), "", "", 20); err == nil {
 		t.Fatalf("expected org mismatch error")
 	}
-	if err := ValidateCursor(state, "acme", queryHash("bar"), 20); err == nil {
+	if err := ValidateCursor(state, "acme", queryHash("bar"), "", "", 20); err == nil {
 		t.Fatalf("expected query mismatch error")
 	}
-	if err := ValidateCursor(state, "acme", queryHash("foo"), 30); err == nil {
+	if err := ValidateCursor(state, "acme", queryHash("foo"), "", "", 30); err == nil {
 		t.Fatalf("expected limit mismatch error")
 	}
 }

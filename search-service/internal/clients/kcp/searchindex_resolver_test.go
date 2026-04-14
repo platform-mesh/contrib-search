@@ -11,7 +11,7 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-func TestResolveIndexMatchesByOrganizationClusterID(t *testing.T) {
+func TestListIndicesBuildsResourceDescriptors(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/clusters/root:orgs/apis/tenancy.kcp.io/v1alpha1/workspaces/acme":
@@ -20,14 +20,25 @@ func TestResolveIndexMatchesByOrganizationClusterID(t *testing.T) {
 			writeJSON(t, w, searchIndexListPayload(map[string]interface{}{
 				"items": []map[string]interface{}{
 					{
-						"metadata": map[string]interface{}{"name": "acme"},
-						"spec":     map[string]interface{}{"organizationClusterID": "cluster-other"},
-						"status":   map[string]interface{}{"indexName": "pm-orgs-cluster-other"},
+						"metadata": map[string]interface{}{"name": "pm-cluster-123-accounts"},
+						"spec": map[string]interface{}{
+							"indexPrefix":           "pm",
+							"organizationClusterID": "cluster-123",
+							"defaultFields":         []string{"displayName", "description"},
+							"filterableFields":      []string{"status"},
+							"semanticFields":        []string{"description"},
+						},
+						"status": map[string]interface{}{"indexName": "pm-cluster-123-accounts"},
 					},
 					{
-						"metadata": map[string]interface{}{"name": "searchindex-acme"},
-						"spec":     map[string]interface{}{"organizationClusterID": "cluster-123"},
-						"status":   map[string]interface{}{"indexName": "pm-orgs-cluster-123"},
+						"metadata": map[string]interface{}{"name": "pm-cluster-123-products"},
+						"spec": map[string]interface{}{
+							"indexPrefix":           "pm",
+							"organizationClusterID": "cluster-123",
+							"defaultFields":         []string{"name"},
+							"filterableFields":      []string{"category"},
+						},
+						"status": map[string]interface{}{"indexName": "pm-cluster-123-products"},
 					},
 				},
 			}))
@@ -38,19 +49,56 @@ func TestResolveIndexMatchesByOrganizationClusterID(t *testing.T) {
 	defer server.Close()
 
 	resolver := newTestResolver(t, server.URL)
-	ref, err := resolver.ResolveIndex(context.Background(), "acme")
+	refs, err := resolver.ListIndices(context.Background(), "acme")
+	if err != nil {
+		t.Fatalf("ListIndices returned error: %v", err)
+	}
+	if len(refs) != 2 {
+		t.Fatalf("expected 2 refs, got %d", len(refs))
+	}
+	if refs[0].Resource != "accounts" || refs[1].Resource != "products" {
+		t.Fatalf("unexpected resources: %+v", refs)
+	}
+}
+
+func TestResolveIndexByResource(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/clusters/root:orgs/apis/tenancy.kcp.io/v1alpha1/workspaces/acme":
+			writeJSON(t, w, workspacePayload("acme", "cluster-123"))
+		case "/clusters/root:orgs/apis/core.platform-mesh.io/v1alpha1/searchindices":
+			writeJSON(t, w, searchIndexListPayload(map[string]interface{}{
+				"items": []map[string]interface{}{
+					{
+						"metadata": map[string]interface{}{"name": "pm-cluster-123-accounts"},
+						"spec": map[string]interface{}{
+							"indexPrefix":           "pm",
+							"organizationClusterID": "cluster-123",
+						},
+						"status": map[string]interface{}{"indexName": "pm-cluster-123-accounts"},
+					},
+				},
+			}))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	resolver := newTestResolver(t, server.URL)
+	ref, err := resolver.ResolveIndex(context.Background(), "acme", "accounts")
 	if err != nil {
 		t.Fatalf("ResolveIndex returned error: %v", err)
 	}
-	if ref.IndexName != "pm-orgs-cluster-123" {
+	if ref.IndexName != "pm-cluster-123-accounts" {
 		t.Fatalf("unexpected index name: %s", ref.IndexName)
 	}
-	if ref.OrganizationClusterID != "cluster-123" {
-		t.Fatalf("unexpected org cluster id: %s", ref.OrganizationClusterID)
+	if ref.Resource != "accounts" {
+		t.Fatalf("unexpected resource: %s", ref.Resource)
 	}
 }
 
-func TestResolveIndexFallsBackToResourceName(t *testing.T) {
+func TestListIndicesReturnsErrorWhenResourceIsAmbiguous(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/clusters/root:orgs/apis/tenancy.kcp.io/v1alpha1/workspaces/acme":
@@ -59,14 +107,20 @@ func TestResolveIndexFallsBackToResourceName(t *testing.T) {
 			writeJSON(t, w, searchIndexListPayload(map[string]interface{}{
 				"items": []map[string]interface{}{
 					{
-						"metadata": map[string]interface{}{"name": "acme"},
-						"spec":     map[string]interface{}{"organizationClusterID": ""},
-						"status":   map[string]interface{}{"indexName": "pm-orgs-static"},
+						"metadata": map[string]interface{}{"name": "pm-cluster-123-accounts"},
+						"spec": map[string]interface{}{
+							"indexPrefix":           "pm",
+							"organizationClusterID": "cluster-123",
+						},
+						"status": map[string]interface{}{"indexName": "pm-cluster-123-accounts-a"},
 					},
 					{
-						"metadata": map[string]interface{}{"name": "other"},
-						"spec":     map[string]interface{}{"organizationClusterID": "cluster-other"},
-						"status":   map[string]interface{}{"indexName": "pm-orgs-cluster-other"},
+						"metadata": map[string]interface{}{"name": "pm-cluster-123-accounts"},
+						"spec": map[string]interface{}{
+							"indexPrefix":           "pm",
+							"organizationClusterID": "cluster-123",
+						},
+						"status": map[string]interface{}{"indexName": "pm-cluster-123-accounts-b"},
 					},
 				},
 			}))
@@ -77,78 +131,8 @@ func TestResolveIndexFallsBackToResourceName(t *testing.T) {
 	defer server.Close()
 
 	resolver := newTestResolver(t, server.URL)
-	ref, err := resolver.ResolveIndex(context.Background(), "acme")
-	if err != nil {
-		t.Fatalf("ResolveIndex returned error: %v", err)
-	}
-	if ref.IndexName != "pm-orgs-static" {
-		t.Fatalf("unexpected index name: %s", ref.IndexName)
-	}
-	if ref.OrganizationClusterID != "cluster-123" {
-		t.Fatalf("expected workspace cluster id fallback, got %s", ref.OrganizationClusterID)
-	}
-}
-
-func TestResolveIndexFallsBackToSpecOrganizationClusterIDWhenStatusEmpty(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/clusters/root:orgs/apis/tenancy.kcp.io/v1alpha1/workspaces/acme":
-			writeJSON(t, w, workspacePayload("acme", "cluster-123"))
-		case "/clusters/root:orgs/apis/core.platform-mesh.io/v1alpha1/searchindices":
-			writeJSON(t, w, searchIndexListPayload(map[string]interface{}{
-				"items": []map[string]interface{}{
-					{
-						"metadata": map[string]interface{}{"name": "searchindex-acme"},
-						"spec":     map[string]interface{}{"organizationClusterID": "cluster-123"},
-						"status":   map[string]interface{}{"indexName": ""},
-					},
-				},
-			}))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
-	resolver := newTestResolver(t, server.URL)
-	ref, err := resolver.ResolveIndex(context.Background(), "acme")
-	if err != nil {
-		t.Fatalf("ResolveIndex returned error: %v", err)
-	}
-	if ref.IndexName != "cluster-123" {
-		t.Fatalf("expected spec.organizationClusterID fallback index name, got %s", ref.IndexName)
-	}
-}
-
-func TestResolveIndexReturnsErrorWhenClusterMatchIsAmbiguous(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/clusters/root:orgs/apis/tenancy.kcp.io/v1alpha1/workspaces/acme":
-			writeJSON(t, w, workspacePayload("acme", "cluster-123"))
-		case "/clusters/root:orgs/apis/core.platform-mesh.io/v1alpha1/searchindices":
-			writeJSON(t, w, searchIndexListPayload(map[string]interface{}{
-				"items": []map[string]interface{}{
-					{
-						"metadata": map[string]interface{}{"name": "idx-1"},
-						"spec":     map[string]interface{}{"organizationClusterID": "cluster-123"},
-						"status":   map[string]interface{}{"indexName": "pm-orgs-cluster-123-a"},
-					},
-					{
-						"metadata": map[string]interface{}{"name": "idx-2"},
-						"spec":     map[string]interface{}{"organizationClusterID": "cluster-123"},
-						"status":   map[string]interface{}{"indexName": "pm-orgs-cluster-123-b"},
-					},
-				},
-			}))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
-	resolver := newTestResolver(t, server.URL)
-	if _, err := resolver.ResolveIndex(context.Background(), "acme"); err == nil {
-		t.Fatalf("expected error for ambiguous cluster matches")
+	if _, err := resolver.ListIndices(context.Background(), "acme"); err == nil {
+		t.Fatalf("expected ambiguous resource error")
 	}
 }
 

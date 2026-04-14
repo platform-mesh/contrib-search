@@ -12,29 +12,56 @@ The service is organization-aware and derives org context from the request host.
 
 ## Features
 
-- REST endpoint: `GET /rest/v1/search`
+- REST endpoints:
+  - `GET /rest/v1/search`
+  - `GET /rest/v1/search/resources`
+  - `GET /rest/v1/search/filter-values`
 - Free-text search in OpenSearch with stable cursor pagination (`search_after`)
 - OpenFGA post-filtering (`relation=get`) with fail-closed behavior for incomplete auth context
 - Org-aware context + KCP token/org access pre-check
+- SearchIndex-driven resource/field metadata:
+  - `defaultFields` drive searchable fields
+  - `filterableFields` drive exact-match filters
+  - `semanticFields` are exposed as metadata (no semantic query mode yet)
 - Health endpoints: `/healthz`, `/readyz`
 
 ## API
 
 ### Search endpoint
 
-`GET /rest/v1/search?q=<query>&limit=<n>&cursor=<opaque>`
+`GET /rest/v1/search?q=<query>&limit=<n>&cursor=<opaque>&resource=<plural>&filter.<field>=<value>`
 
 Query params:
 
 - `q` (required): free-text query
+- `resource` (optional): plural resource name; if omitted, searches across all resources
+- `filter.<field>` (optional, repeatable): exact-match filters; requires `resource`
 - `limit` (optional): default `20`, max `100`
 - `cursor` (optional): opaque pagination cursor
 
 Response shape:
 
 - `results[]` with compact fields (`id`, `score`, `kind`, `name`, `namespace`, `apiGroup`, `apiVersion`, `workspacePath`, `clusterName`, `organizationId`, `organizationName`, `accountId`, `accountName`)
+- `results[].resource` indicates which resource index produced the hit
 - `source` containing the raw indexed document source per hit
 - `nextCursor` for pagination
+
+### Resource metadata endpoint
+
+`GET /rest/v1/search/resources`
+
+Returns all searchable resources for the org with:
+
+- `resource`
+- `defaultFields`
+- `filterableFields`
+- `semanticFields`
+
+### Filter values endpoint
+
+`GET /rest/v1/search/filter-values?resource=<plural>&field=<filterable>&q=<optional>&filter.<field>=<value>`
+
+Returns distinct authorized values for one filterable field within a single resource.
 
 ## Getting Started
 

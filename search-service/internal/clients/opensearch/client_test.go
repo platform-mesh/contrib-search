@@ -3,10 +3,16 @@ package opensearch
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/platform-mesh/search/internal/service/search"
 )
 
 func TestBuildQueryBodyWithoutSearchAfter(t *testing.T) {
-	body, err := BuildQueryBody("hello", 20, nil)
+	body, err := BuildQueryBody(search.OpenSearchQuery{
+		Query:  "hello",
+		Fields: []string{"name", "description"},
+		Size:   20,
+	})
 	if err != nil {
 		t.Fatalf("BuildQueryBody returned error: %v", err)
 	}
@@ -24,13 +30,21 @@ func TestBuildQueryBodyWithoutSearchAfter(t *testing.T) {
 	}
 
 	sort := payload["sort"].([]interface{})
-	if len(sort) != 2 {
-		t.Fatalf("expected 2 sort fields")
+	if len(sort) != 3 {
+		t.Fatalf("expected 3 sort fields")
 	}
 }
 
 func TestBuildQueryBodyWithSearchAfter(t *testing.T) {
-	body, err := BuildQueryBody("hello", 10, []interface{}{1.0, "id-1"})
+	body, err := BuildQueryBody(search.OpenSearchQuery{
+		Query:       "hello",
+		Fields:      []string{"name"},
+		Size:        10,
+		SearchAfter: []interface{}{1.0, "id-1", "idx"},
+		Filters: map[string][]string{
+			"status": {"Ready"},
+		},
+	})
 	if err != nil {
 		t.Fatalf("BuildQueryBody returned error: %v", err)
 	}
@@ -41,7 +55,33 @@ func TestBuildQueryBodyWithSearchAfter(t *testing.T) {
 	}
 
 	searchAfter := payload["search_after"].([]interface{})
-	if len(searchAfter) != 2 {
-		t.Fatalf("expected 2 search_after values")
+	if len(searchAfter) != 3 {
+		t.Fatalf("expected 3 search_after values")
+	}
+
+	query := payload["query"].(map[string]interface{})
+	boolQuery := query["bool"].(map[string]interface{})
+	if _, ok := boolQuery["filter"]; !ok {
+		t.Fatalf("expected filter clause")
+	}
+}
+
+func TestBuildQueryBodyWithoutQueryUsesMatchAll(t *testing.T) {
+	body, err := BuildQueryBody(search.OpenSearchQuery{
+		Query: "",
+		Size:  5,
+	})
+	if err != nil {
+		t.Fatalf("BuildQueryBody returned error: %v", err)
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("invalid json: %v", err)
+	}
+
+	query := payload["query"].(map[string]interface{})
+	if _, ok := query["match_all"]; !ok {
+		t.Fatalf("expected match_all query")
 	}
 }

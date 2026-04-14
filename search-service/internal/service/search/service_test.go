@@ -7,12 +7,23 @@ import (
 )
 
 type fakeResolver struct {
-	index SearchIndexRef
-	err   error
+	index   SearchIndexRef
+	indices []SearchIndexRef
+	err     error
 }
 
-func (f fakeResolver) ResolveIndex(ctx context.Context, org string) (SearchIndexRef, error) {
+func (f fakeResolver) ResolveIndex(ctx context.Context, org, resource string) (SearchIndexRef, error) {
 	return f.index, f.err
+}
+
+func (f fakeResolver) ListIndices(ctx context.Context, org string) ([]SearchIndexRef, error) {
+	if len(f.indices) > 0 {
+		return f.indices, f.err
+	}
+	if f.index.IndexName != "" {
+		return []SearchIndexRef{f.index}, f.err
+	}
+	return nil, f.err
 }
 
 type fakeSearcher struct {
@@ -20,7 +31,7 @@ type fakeSearcher struct {
 	calls int
 }
 
-func (f *fakeSearcher) Search(ctx context.Context, indexName, query string, size int, searchAfter []interface{}) (OpenSearchPage, error) {
+func (f *fakeSearcher) Search(ctx context.Context, req OpenSearchQuery) (OpenSearchPage, error) {
 	if f.calls >= len(f.pages) {
 		return OpenSearchPage{}, nil
 	}
@@ -149,5 +160,65 @@ func TestSearchClampsLimitToConfiguredMax(t *testing.T) {
 	}
 	if decoded.Limit != 100 {
 		t.Fatalf("expected clamped limit 100, got %d", decoded.Limit)
+	}
+}
+
+func TestFilterValuesPostFiltersAndEnforcesLimit(t *testing.T) {
+	searcher := &fakeSearcher{pages: []OpenSearchPage{
+		{Hits: []OpenSearchHit{
+			{ID: "1", Source: map[string]interface{}{"status": "Terminated"}},
+			{ID: "2", Source: map[string]interface{}{"status": "Active"}},
+			{ID: "3", Source: map[string]interface{}{"status": "Pending"}},
+		}},
+	}}
+
+	svc := NewService(
+		fakeResolver{index: SearchIndexRef{
+			IndexName:        "idx",
+			FilterableFields: []string{"status"},
+		}},
+		searcher,
+		&fakeAuthorizer{results: []AuthorizationResult{
+			{Allowed: []bool{false, true, true}, Calls: 1, Denied: 1},
+		}},
+		nil,
+		ServiceConfig{FetchBatchSize: 10, MaxScannedHits: 100},
+	)
+
+	resp, err := svc.FilterValues(context.Background(), FilterValuesRequest{
+		Organization: "acme",
+		User:         "alice@example.com",
+		Resource:     "pods",
+		Field:        "status",
+		Limit:        1,
+	})
+	if err != nil {
+		t.Fatalf("FilterValues returned error: %v", err)
+	}
+
+	if len(resp.Values) != 1 {
+		t.Fatalf("expected 1 value, got %d", len(resp.Values))
+	}
+	if resp.Values[0] != "Active" {
+		t.Fatalf("unexpected value: %s", resp.Values[0])
+	}
+}
+
+func TestFilterValuesRejectsMissingUser(t *testing.T) {
+	svc := NewService(
+		fakeResolver{index: SearchIndexRef{IndexName: "idx", FilterableFields: []string{"status"}}},
+		&fakeSearcher{},
+		&fakeAuthorizer{},
+		nil,
+		ServiceConfig{},
+	)
+
+	_, err := svc.FilterValues(context.Background(), FilterValuesRequest{
+		Organization: "acme",
+		Resource:     "pods",
+		Field:        "status",
+	})
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("expected ErrInvalidRequest, got %v", err)
 	}
 }

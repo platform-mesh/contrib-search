@@ -6,6 +6,8 @@ type SearchRequest struct {
 	Organization string
 	User         string
 	Query        string
+	Resource     string
+	Filters      map[string][]string
 	Limit        int
 	Cursor       string
 }
@@ -18,6 +20,7 @@ type SearchResponse struct {
 type SearchHit struct {
 	ID               string                 `json:"id"`
 	Score            float64                `json:"score"`
+	Resource         string                 `json:"resource,omitempty"`
 	Kind             string                 `json:"kind,omitempty"`
 	Name             string                 `json:"name,omitempty"`
 	Namespace        string                 `json:"namespace,omitempty"`
@@ -32,14 +35,49 @@ type SearchHit struct {
 	Source           map[string]interface{} `json:"source"`
 }
 
+type SearchResourcesRequest struct {
+	Organization string
+}
+
+type SearchResource struct {
+	Resource         string   `json:"resource"`
+	DefaultFields    []string `json:"defaultFields,omitempty"`
+	FilterableFields []string `json:"filterableFields,omitempty"`
+	SemanticFields   []string `json:"semanticFields,omitempty"`
+}
+
+type SearchResourcesResponse struct {
+	Resources []SearchResource `json:"resources"`
+}
+
+type FilterValuesRequest struct {
+	Organization string
+	User         string
+	Resource     string
+	Field        string
+	Query        string
+	Filters      map[string][]string
+	Limit        int
+}
+
+type FilterValuesResponse struct {
+	Values []string `json:"values"`
+}
+
 type SearchIndexRef struct {
+	Resource              string
 	IndexName             string
+	IndexPrefix           string
 	OrganizationClusterID string
+	DefaultFields         []string
+	FilterableFields      []string
+	SemanticFields        []string
 	Group                 string
 	Version               string
 }
 
 type OpenSearchHit struct {
+	Index  string
 	ID     string
 	Score  float64
 	Sort   []interface{}
@@ -47,7 +85,18 @@ type OpenSearchHit struct {
 }
 
 type OpenSearchPage struct {
-	Hits []OpenSearchHit
+	Hits              []OpenSearchHit
+	AggregationValues []string
+}
+
+type OpenSearchQuery struct {
+	Indices          []string
+	Query            string
+	Fields           []string
+	Filters          map[string][]string
+	Size             int
+	SearchAfter      []interface{}
+	AggregationField string
 }
 
 type AuthorizationRequest struct {
@@ -65,11 +114,12 @@ type AuthorizationResult struct {
 }
 
 type SearchIndexResolver interface {
-	ResolveIndex(ctx context.Context, org string) (SearchIndexRef, error)
+	ResolveIndex(ctx context.Context, org, resource string) (SearchIndexRef, error)
+	ListIndices(ctx context.Context, org string) ([]SearchIndexRef, error)
 }
 
 type OpenSearchSearcher interface {
-	Search(ctx context.Context, indexName, query string, size int, searchAfter []interface{}) (OpenSearchPage, error)
+	Search(ctx context.Context, req OpenSearchQuery) (OpenSearchPage, error)
 }
 
 type FGAAuthorizer interface {
