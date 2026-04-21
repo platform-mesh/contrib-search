@@ -16,7 +16,7 @@ func TestListIndicesBuildsResourceDescriptors(t *testing.T) {
 		switch r.URL.Path {
 		case "/clusters/root:orgs/apis/tenancy.kcp.io/v1alpha1/workspaces/acme":
 			writeJSON(t, w, workspacePayload("acme", "cluster-123"))
-		case "/clusters/root:orgs/apis/core.platform-mesh.io/v1alpha1/searchindices":
+		case "/clusters/root:orgs/apis/core.platform-mesh.io/v1alpha1/searchindexes":
 			writeJSON(t, w, searchIndexListPayload(map[string]interface{}{
 				"items": []map[string]interface{}{
 					{
@@ -66,7 +66,7 @@ func TestResolveIndexByResource(t *testing.T) {
 		switch r.URL.Path {
 		case "/clusters/root:orgs/apis/tenancy.kcp.io/v1alpha1/workspaces/acme":
 			writeJSON(t, w, workspacePayload("acme", "cluster-123"))
-		case "/clusters/root:orgs/apis/core.platform-mesh.io/v1alpha1/searchindices":
+		case "/clusters/root:orgs/apis/core.platform-mesh.io/v1alpha1/searchindexes":
 			writeJSON(t, w, searchIndexListPayload(map[string]interface{}{
 				"items": []map[string]interface{}{
 					{
@@ -103,7 +103,7 @@ func TestListIndicesReturnsErrorWhenResourceIsAmbiguous(t *testing.T) {
 		switch r.URL.Path {
 		case "/clusters/root:orgs/apis/tenancy.kcp.io/v1alpha1/workspaces/acme":
 			writeJSON(t, w, workspacePayload("acme", "cluster-123"))
-		case "/clusters/root:orgs/apis/core.platform-mesh.io/v1alpha1/searchindices":
+		case "/clusters/root:orgs/apis/core.platform-mesh.io/v1alpha1/searchindexes":
 			writeJSON(t, w, searchIndexListPayload(map[string]interface{}{
 				"items": []map[string]interface{}{
 					{
@@ -143,7 +143,7 @@ func newTestResolver(t *testing.T, base string) *SearchIndexResolver {
 		WorkspacePath: "root:orgs",
 		Group:         "core.platform-mesh.io",
 		Version:       "v1alpha1",
-		Resource:      "searchindices",
+		Resource:      "searchindexes",
 	}, nil)
 	if err != nil {
 		t.Fatalf("create resolver: %v", err)
