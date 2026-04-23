@@ -114,7 +114,7 @@ Main runtime flags (with defaults):
 - `--searchindex-workspace-path` (default: `root:orgs`)
 - `--searchindex-group` (default: `core.platform-mesh.io`)
 - `--searchindex-version` (default: `v1alpha1`)
-- `--searchindex-resource` (default: `searchindices`)
+- `--searchindex-resource` (default: `searchindexes`)
 - `--search-default-limit` (default: `20`)
 - `--search-max-limit` (default: `100`)
 - `--search-fetch-batch-size` (default: `100`)
