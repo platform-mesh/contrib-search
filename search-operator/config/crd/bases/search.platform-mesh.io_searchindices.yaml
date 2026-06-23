@@ -3,14 +3,14 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.19.0
-  name: searchindexes.search.platform-mesh.io
+    controller-gen.kubebuilder.io/version: v0.16.4
+  name: searchindices.search.platform-mesh.io
 spec:
   group: search.platform-mesh.io
   names:
     kind: SearchIndex
     listKind: SearchIndexList
-    plural: searchindexes
+    plural: searchindices
     singular: searchindex
   scope: Cluster
   versions:
@@ -76,7 +76,7 @@ spec:
                 format: int32
                 type: integer
               organizationClusterID:
-                description: OrganizationClusterID immutable KCP cluster ID (LogicalCluster's
+                description: OrganizationClusterID immutable kcp cluster ID (LogicalCluster's
                   kcp.io/cluster annotation); used as OpenSearch index name
                 pattern: ^[a-z0-9][a-z0-9-]*$
                 type: string

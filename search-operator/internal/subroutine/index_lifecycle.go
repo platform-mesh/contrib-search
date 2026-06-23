@@ -1,3 +1,19 @@
+/*
+Copyright The Platform Mesh Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package subroutine
 
 import (
@@ -6,19 +22,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/platform-mesh/golang-commons/controller/lifecycle/runtimeobject"
-	lifecyclesubroutine "github.com/platform-mesh/golang-commons/controller/lifecycle/subroutine"
-	"github.com/platform-mesh/golang-commons/errors"
-	"github.com/platform-mesh/golang-commons/logger"
+	"go.platform-mesh.io/golang-commons/controller/lifecycle/runtimeobject"
+	lifecyclesubroutine "go.platform-mesh.io/golang-commons/controller/lifecycle/subroutine"
+	"go.platform-mesh.io/golang-commons/errors"
+	"go.platform-mesh.io/golang-commons/logger"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	mccontext "sigs.k8s.io/multicluster-runtime/pkg/context"
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
 
-	"github.com/platform-mesh/search-operator/api/v1alpha1"
-	"github.com/platform-mesh/search-operator/internal/metrics"
-	"github.com/platform-mesh/search-operator/internal/opensearch"
+	"go.platform-mesh.io/apis/search/v1alpha1"
+	"go.platform-mesh.io/search-operator/internal/metrics"
+	"go.platform-mesh.io/search-operator/internal/opensearch"
 )
 
 // IndexLifecycleSubroutine manages the lifecycle of OpenSearch indices
@@ -239,14 +255,14 @@ func (s *IndexLifecycleSubroutine) Finalize(ctx context.Context, instance runtim
 	if indexName == "" {
 		log.Warn().
 			Str("name", searchIndex.GetName()).
-			Str("workspace", workspaceName).
+			Str("workspace", workspaceName.String()).
 			Msg("SearchIndex has no indexName in status; skipping OpenSearch cleanup")
 		return ctrl.Result{}, nil
 	}
 
 	log.Info().
 		Str("name", searchIndex.GetName()).
-		Str("reconcileWorkspace", workspaceName).
+		Str("reconcileWorkspace", workspaceName.String()).
 		Str("indexName", indexName).
 		Msg("finalizing SearchIndex")
 

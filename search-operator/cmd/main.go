@@ -1,3 +1,19 @@
+/*
+Copyright The Platform Mesh Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package main
 
 import (
@@ -10,7 +26,7 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
-	"github.com/platform-mesh/golang-commons/logger"
+	"go.platform-mesh.io/golang-commons/logger"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -22,19 +38,19 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	// KCP imports
+	// kcp imports
 	"github.com/kcp-dev/multicluster-provider/apiexport"
 	apisv1alpha1 "github.com/kcp-dev/sdk/apis/apis/v1alpha1"
 	kcpcorev1alpha1 "github.com/kcp-dev/sdk/apis/core/v1alpha1"
 	kcptenancyv1alpha1 "github.com/kcp-dev/sdk/apis/tenancy/v1alpha1"
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
 
-	accountv1alpha1 "github.com/platform-mesh/account-operator/api/v1alpha1"
+	corev1alpha1 "go.platform-mesh.io/apis/core/v1alpha1"
+	searchv1alpha1 "go.platform-mesh.io/apis/search/v1alpha1"
 
-	corev1alpha1 "github.com/platform-mesh/search-operator/api/v1alpha1"
-	"github.com/platform-mesh/search-operator/internal/config"
-	"github.com/platform-mesh/search-operator/internal/controller"
-	"github.com/platform-mesh/search-operator/internal/opensearch"
+	"go.platform-mesh.io/search-operator/internal/config"
+	"go.platform-mesh.io/search-operator/internal/controller"
+	"go.platform-mesh.io/search-operator/internal/opensearch"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -46,14 +62,14 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
-	// Add KCP types to scheme
+	// Add kcp types to scheme
 	utilruntime.Must(apisv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(kcpcorev1alpha1.AddToScheme(scheme))
 	utilruntime.Must(kcptenancyv1alpha1.AddToScheme(scheme))
 
 	// Add our types
 	utilruntime.Must(corev1alpha1.AddToScheme(scheme))
-	utilruntime.Must(accountv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(searchv1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -74,7 +90,7 @@ func main() {
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
 	flag.StringVar(&kcpKubeconfig, "kcp-kubeconfig", "/etc/kcp/kubeconfig",
-		"Path to the KCP kubeconfig file.")
+		"Path to the kcp kubeconfig file.")
 	flag.StringVar(&apiExportEndpointSliceName, "api-export-endpoint-slice-name", "search.platform-mesh.io",
 		"Name of the APIExportEndpointSlice to use for the multicluster provider.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
@@ -107,14 +123,14 @@ func main() {
 		tlsOpts = append(tlsOpts, disableHTTP2)
 	}
 
-	// Get KCP config
+	// Get kcp config
 	kcpCfg, err := getKCPConfig(kcpKubeconfig)
 	if err != nil {
-		setupLog.Error(err, "unable to get KCP config")
+		setupLog.Error(err, "unable to get kcp config")
 		os.Exit(1)
 	}
 
-	// Create KCP multicluster provider using APIExport
+	// Create kcp multicluster provider using APIExport
 	provider, err := apiexport.New(kcpCfg, apiExportEndpointSliceName, apiexport.Options{
 		Scheme: scheme,
 	})
@@ -216,7 +232,7 @@ func main() {
 
 }
 
-// getKCPConfig loads the KCP kubeconfig from the specified path
+// getKCPConfig loads the kcp kubeconfig from the specified path
 func getKCPConfig(kubeconfigPath string) (*rest.Config, error) {
 	// First check if KCP_KUBECONFIG env var is set
 	if envPath := os.Getenv("KCP_KUBECONFIG"); envPath != "" {

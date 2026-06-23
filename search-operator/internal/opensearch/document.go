@@ -1,3 +1,19 @@
+/*
+Copyright The Platform Mesh Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package opensearch
 
 import (
@@ -5,6 +21,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"sigs.k8s.io/multicluster-runtime/pkg/multicluster"
 )
 
 // DefaultIndexMapping returns the default OpenSearch index mapping for workspace and resource documents.
@@ -150,9 +168,9 @@ type WorkspaceDocument struct {
 	Name string `json:"name"` // Human-readable name
 	Type string `json:"type"` // "workspace", "account", or "organization"
 
-	// KCP-specific fields
+	// kcp-specific fields
 	ClusterName string `json:"cluster_name"` // Logical cluster name
-	Path        string `json:"path"`         // Full path in the KCP hierarchy
+	Path        string `json:"path"`         // Full path in the kcp hierarchy
 
 	// Organization context (for permission scoping)
 	OrganizationID   string `json:"organization_id,omitempty"`
@@ -259,13 +277,13 @@ func (d *WorkspaceDocument) AddPermission(user, relation, object string) {
 }
 
 // NewResourceDocument creates a new resource document with default values
-func NewResourceDocument(id, kind, name, namespace, clusterName, workspacePath string) *ResourceDocument {
+func NewResourceDocument(id, kind, name, namespace string, clusterName multicluster.ClusterName, workspacePath string) *ResourceDocument {
 	return &ResourceDocument{
 		ID:            id,
 		Kind:          kind,
 		Name:          name,
 		Namespace:     namespace,
-		ClusterName:   clusterName,
+		ClusterName:   string(clusterName),
 		WorkspacePath: workspacePath,
 		UpdatedAt:     time.Now(),
 	}

@@ -1,3 +1,19 @@
+/*
+Copyright The Platform Mesh Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package subroutine
 
 import (
@@ -16,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	mccontext "sigs.k8s.io/multicluster-runtime/pkg/context"
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
+	"sigs.k8s.io/multicluster-runtime/pkg/multicluster"
 )
 
 // stripPathFromConfig returns a copy of cfg with the URL path cleared,
@@ -24,7 +41,7 @@ func stripPathFromConfig(cfg *rest.Config) (*rest.Config, error) {
 	out := rest.CopyConfig(cfg)
 	parsed, err := url.Parse(out.Host)
 	if err != nil {
-		return nil, fmt.Errorf("parse KCP host URL: %w", err)
+		return nil, fmt.Errorf("parse kcp host URL: %w", err)
 	}
 	parsed.Path = ""
 	out.Host = parsed.String()
@@ -34,7 +51,7 @@ func stripPathFromConfig(cfg *rest.Config) (*rest.Config, error) {
 // getWorkspaceClusterAndPath reads the LogicalCluster singleton from the
 // current workspace and returns its cluster ID and path annotation
 // (e.g. "root:orgs:acme").
-func getWorkspaceClusterAndPath(ctx context.Context, mgr mcmanager.Manager) (clusterID string, workspacePath string, err error) {
+func getWorkspaceClusterAndPath(ctx context.Context, mgr mcmanager.Manager) (clusterID multicluster.ClusterName, workspacePath string, err error) {
 	id, ok := mccontext.ClusterFrom(ctx)
 	if !ok {
 		return "", "", fmt.Errorf("cluster not found in context")
@@ -85,7 +102,7 @@ func getOrgClusterID(ctx context.Context, orgsClient client.Client, orgName stri
 	return ws.Spec.Cluster, nil
 }
 
-// buildWorkspaceScopedClient constructs a client targeting the given KCP
+// buildWorkspaceScopedClient constructs a client targeting the given kcp
 // workspace path (e.g. "root:orgs:acme") using rootCfg as the base URL.
 func buildWorkspaceScopedClient(rootCfg *rest.Config, scheme *runtime.Scheme, workspacePath string) (client.Client, error) {
 	cfg := rest.CopyConfig(rootCfg)
