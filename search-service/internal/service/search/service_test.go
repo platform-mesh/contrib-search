@@ -127,11 +127,21 @@ func TestSearchInvalidCursor(t *testing.T) {
 	}
 }
 
-func TestSearchRejectsMissingQuery(t *testing.T) {
-	svc := NewService(fakeResolver{}, &fakeSearcher{}, &fakeAuthorizer{}, nil, ServiceConfig{})
-	_, err := svc.Search(context.Background(), SearchRequest{Organization: "acme", User: "alice@example.com", Query: "  "})
-	if !errors.Is(err, ErrInvalidRequest) {
-		t.Fatalf("expected ErrInvalidRequest, got %v", err)
+func TestSearchEmptyQueryMatchesAll(t *testing.T) {
+	hit := OpenSearchHit{ID: "1", Score: 1, Sort: []any{1.0, "1"}, Source: map[string]any{"id": "1"}}
+	svc := NewService(
+		fakeResolver{index: SearchIndexRef{IndexName: "idx-acme", Resource: "accounts"}},
+		&fakeSearcher{pages: []OpenSearchPage{{Hits: []OpenSearchHit{hit}}}},
+		&fakeAuthorizer{results: []AuthorizationResult{{Allowed: []bool{true}, Calls: 1}}},
+		nil,
+		ServiceConfig{},
+	)
+	resp, err := svc.Search(t.Context(), SearchRequest{Organization: "acme", User: "alice@example.com", Query: "  "})
+	if err != nil {
+		t.Fatalf("expected no error for empty query, got %v", err)
+	}
+	if len(resp.Results) == 0 {
+		t.Fatal("expected results for empty query (match-all)")
 	}
 }
 
