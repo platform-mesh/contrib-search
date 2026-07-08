@@ -85,7 +85,7 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (SearchResponse
 
 	query := strings.TrimSpace(req.Query)
 	if query == "" {
-		return SearchResponse{}, fmt.Errorf("%w: q is required", ErrInvalidRequest)
+		query = "*"
 	}
 	org := strings.TrimSpace(req.Organization)
 	if org == "" {
