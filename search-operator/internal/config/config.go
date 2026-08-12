@@ -35,11 +35,11 @@ type Config struct {
 
 	OpenSearch struct {
 		// URL is the OpenSearch endpoint URL
-		URL string `mapstructure:"opensearch-url"  envconfig:"default=https://opensearch.portal.localhost:8443"`
+		URL string `mapstructure:"opensearch-url" envconfig:"OPENSEARCH_URL"`
 		// Username for OpenSearch authentication
-		Username string `mapstructure:"opensearch-username" envconfig:"default=admin"`
+		Username string `mapstructure:"opensearch-username" envconfig:"OPENSEARCH_USERNAME"`
 		// Password for OpenSearch authentication
-		Password string `mapstructure:"opensearch-password" envconfig:"default=admin"`
+		Password string `mapstructure:"opensearch-password" envconfig:"OPENSEARCH_PASSWORD"`
 		// IndexNamePrefix is a static prefix for all operator-managed index names and aliases.
 		IndexNamePrefix string `mapstructure:"opensearch-index-name-prefix" envconfig:"default=pm-orgs"`
 		// SemanticModelID is the OpenSearch ML model ID used for semantic field mappings.
