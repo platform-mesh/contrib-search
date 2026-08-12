@@ -19,12 +19,11 @@ package cmd
 import (
 	"github.com/spf13/cobra"
 
-	"go.platform-mesh.io/search-operator/internal/config"
-	platformmeshcontext "go.platform-mesh.io/golang-commons/config"
-	"go.platform-mesh.io/golang-commons/logger"
-
 	pmcorev1alpha1 "go.platform-mesh.io/apis/core/v1alpha1"
 	pmsearchv1alpha1 "go.platform-mesh.io/apis/search/v1alpha1"
+	platformmeshcontext "go.platform-mesh.io/golang-commons/config"
+	"go.platform-mesh.io/golang-commons/logger"
+	"go.platform-mesh.io/search-operator/internal/config"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -36,7 +35,7 @@ import (
 )
 
 var (
-	scheme     = runtime.NewScheme()
+	scheme      = runtime.NewScheme()
 	operatorCfg config.OperatorConfig
 	defaultCfg  *platformmeshcontext.CommonServiceConfig
 	log         *logger.Logger

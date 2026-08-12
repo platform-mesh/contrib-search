@@ -21,6 +21,12 @@ import (
 	"crypto/tls"
 
 	"github.com/spf13/cobra"
+
+	platformmeshcontext "go.platform-mesh.io/golang-commons/context"
+	"go.platform-mesh.io/golang-commons/traces"
+	"go.platform-mesh.io/search-operator/internal/controller"
+	"go.platform-mesh.io/search-operator/internal/opensearch"
+
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/tools/clientcmd"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -29,11 +35,6 @@ import (
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
 
 	"github.com/kcp-dev/multicluster-provider/apiexport"
-
-	platformmeshcontext "go.platform-mesh.io/golang-commons/context"
-	"go.platform-mesh.io/golang-commons/traces"
-	"go.platform-mesh.io/search-operator/internal/controller"
-	"go.platform-mesh.io/search-operator/internal/opensearch"
 
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 )
@@ -123,7 +124,8 @@ func RunController(_ *cobra.Command, _ []string) { // coverage-ignore
 	for _, gvk := range operatorCfg.SearchableResources {
 		obj := &unstructured.Unstructured{}
 		obj.SetGroupVersionKind(gvk.GroupVersionKind)
-		idxReconciler, err := controller.NewIndexableResource(log, operatorCfg, mgr, osClient, operatorCfg.APIExportEndpointSliceName, obj)
+		idxReconciler, err := controller.NewIndexableResource(
+			log, operatorCfg, mgr, osClient, operatorCfg.APIExportEndpointSliceName, obj)
 		if err != nil {
 			log.Fatal().Err(err).Msg("unable to create IndexableResource reconciler")
 		}
