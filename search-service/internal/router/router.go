@@ -69,7 +69,7 @@ func CreateRouter(svc SearchService, mws []func(http.Handler) http.Handler) *chi
 
 		resource := strings.TrimSpace(r.URL.Query().Get("resource"))
 
-		filters, err := parseFilters(r.URL.Query())
+		filters, fgaRole, err := parseSearchFilters(r.URL.Query())
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -90,6 +90,7 @@ func CreateRouter(svc SearchService, mws []func(http.Handler) http.Handler) *chi
 				Mode:         strings.TrimSpace(r.URL.Query().Get("mode")),
 				Resource:     res,
 				Filters:      filters,
+				FGARole:      fgaRole,
 				Limit:        limit,
 				Page:         page,
 				Cursor:       strings.TrimSpace(r.URL.Query().Get("cursor")),
@@ -252,6 +253,33 @@ func parseFilters(values map[string][]string) (map[string][]string, error) {
 		return nil, nil
 	}
 	return filters, nil
+}
+
+func parseSearchFilters(values map[string][]string) (map[string][]string, string, error) {
+	filters, err := parseFilters(values)
+	if err != nil {
+		return nil, "", err
+	}
+
+	entries, ok := values["filter.fga_role"]
+	if !ok {
+		return filters, "", nil
+	}
+	if len(entries) != 1 {
+		return nil, "", fmt.Errorf("filter.fga_role must have exactly one value")
+	}
+
+	fgaRole := strings.TrimSpace(entries[0])
+	if fgaRole == "" {
+		return nil, "", fmt.Errorf("filter.fga_role must not be empty")
+	}
+
+	delete(filters, "fga_role")
+	if len(filters) == 0 {
+		filters = nil
+	}
+
+	return filters, fgaRole, nil
 }
 
 func handleError(w http.ResponseWriter, r *http.Request, rc appcontext.RequestContext, err error) {

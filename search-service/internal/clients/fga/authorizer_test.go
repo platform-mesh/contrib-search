@@ -58,7 +58,7 @@ func TestAuthorizerListAccessibleAccounts(t *testing.T) {
 	cfg.OpenFGA.ObjectType = "custom_account"
 	cfg.OpenFGA.DefaultRole = "viewer"
 
-	accounts, err := NewAuthorizer(client, *cfg).ListAccessibleAccounts(context.Background(), "acme", "john.doe@example.com")
+	accounts, err := NewAuthorizer(client, *cfg).ListAccessibleAccounts(context.Background(), "acme", "john.doe@example.com", "")
 	if err != nil {
 		t.Fatalf("ListAccessibleAccounts returned error: %v", err)
 	}
@@ -70,6 +70,20 @@ func TestAuthorizerListAccessibleAccounts(t *testing.T) {
 	}
 	if got := client.listObjectsRequest; got.GetStoreId() != "store-acme" || got.GetType() != "custom_account" || got.GetRelation() != "viewer" || got.GetUser() != "user:john.doe@example.com" {
 		t.Fatalf("unexpected ListObjects request: %+v", got)
+	}
+}
+
+func TestAuthorizerListAccessibleAccountsUsesRequestedRelation(t *testing.T) {
+	client := &fakeClient{listObjectsResult: &openfgav1.ListObjectsResponse{}}
+	cfg := config.NewServiceConfig()
+	cfg.OpenFGA.DefaultRole = "member"
+
+	_, err := NewAuthorizer(client, *cfg).ListAccessibleAccounts(context.Background(), "acme", "john.doe@example.com", " owner ")
+	if err != nil {
+		t.Fatalf("ListAccessibleAccounts returned error: %v", err)
+	}
+	if got := client.listObjectsRequest.GetRelation(); got != "owner" {
+		t.Fatalf("expected requested relation owner, got %q", got)
 	}
 }
 
