@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -76,21 +75,6 @@ func NewClient(cfg Config) (*Client, error) {
 	}
 
 	return &Client{api: client}, nil
-}
-
-// NewConfigFromEnv reads OpenSearch connection settings from environment variables:
-// OPENSEARCH_URL, OPENSEARCH_USERNAME, OPENSEARCH_PASSWORD, OPENSEARCH_INSECURE.
-func NewConfigFromEnv() (Config, error) {
-	url := os.Getenv("OPENSEARCH_URL")
-	if url == "" {
-		return Config{}, fmt.Errorf("OPENSEARCH_URL is required")
-	}
-	return Config{
-		URL:                url,
-		Username:           os.Getenv("OPENSEARCH_USERNAME"),
-		Password:           os.Getenv("OPENSEARCH_PASSWORD"),
-		InsecureSkipVerify: os.Getenv("OPENSEARCH_INSECURE") == "true",
-	}, nil
 }
 
 // NewClientFromConfig creates a new OpenSearch client from the given Config.

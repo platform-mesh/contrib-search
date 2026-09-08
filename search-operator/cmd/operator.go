@@ -100,12 +100,12 @@ func RunController(_ *cobra.Command, _ []string) { // coverage-ignore
 		log.Fatal().Err(err).Msg("unable to create manager")
 	}
 
-	cfg, err := opensearch.NewConfigFromEnv()
-	if err != nil {
-		log.Fatal().Err(err).Msg("OpenSearch not configured")
-	}
-
-	osClient, err := opensearch.NewClientFromConfig(cfg)
+	osClient, err := opensearch.NewClientFromConfig(opensearch.Config{
+		URL:                operatorCfg.OpenSearchURL,
+		Username:           operatorCfg.OpenSearchUsername,
+		Password:           operatorCfg.OpenSearchPassword,
+		InsecureSkipVerify: operatorCfg.OpenSearchInsecure,
+	})
 	if err != nil {
 		log.Fatal().Err(err).Msg("unable to create OpenSearch client")
 	}

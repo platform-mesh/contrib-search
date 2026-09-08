@@ -47,13 +47,17 @@ type OperatorConfig struct {
 	KCPKubeconfig              string
 	APIExportEndpointSliceName string
 	SearchableResources        []GroupVersionKindProvider
+	OpenSearchURL              string
+	OpenSearchUsername         string
+	OpenSearchPassword         string
+	OpenSearchInsecure         bool
 	OpenSearchIndexNamePrefix  string
 	OpenSearchSemanticModelID  string
 }
 
 func NewOperatorConfig() OperatorConfig {
 	return OperatorConfig{
-		KCPKubeconfig:              "/api-kubeconfig/kubeconfig",
+		KCPKubeconfig:             "/api-kubeconfig/kubeconfig",
 		APIExportEndpointSliceName: "search.platform-mesh.io",
 		OpenSearchIndexNamePrefix:  "pm-orgs",
 	}
@@ -62,6 +66,10 @@ func NewOperatorConfig() OperatorConfig {
 func (c *OperatorConfig) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.KCPKubeconfig, "kcp-kubeconfig", c.KCPKubeconfig, "Path to the kcp kubeconfig file")
 	fs.StringVar(&c.APIExportEndpointSliceName, "api-export-endpoint-slice-name", c.APIExportEndpointSliceName, "Name of the APIExportEndpointSlice to use for the multicluster provider")
+	fs.StringVar(&c.OpenSearchURL, "opensearch-url", c.OpenSearchURL, "OpenSearch server URL (e.g. https://localhost:9200)")
+	fs.StringVar(&c.OpenSearchUsername, "opensearch-username", c.OpenSearchUsername, "Username for OpenSearch basic auth")
+	fs.StringVar(&c.OpenSearchPassword, "opensearch-password", c.OpenSearchPassword, "Password for OpenSearch basic auth")
+	fs.BoolVar(&c.OpenSearchInsecure, "opensearch-insecure", c.OpenSearchInsecure, "Skip TLS certificate verification for OpenSearch (development only)")
 	fs.StringVar(&c.OpenSearchIndexNamePrefix, "opensearch-index-name-prefix", c.OpenSearchIndexNamePrefix, "Static prefix for all operator-managed OpenSearch index names and aliases")
 	fs.StringVar(&c.OpenSearchSemanticModelID, "opensearch-semantic-model-id", c.OpenSearchSemanticModelID, "OpenSearch ML model ID used for semantic field mappings (optional)")
 }

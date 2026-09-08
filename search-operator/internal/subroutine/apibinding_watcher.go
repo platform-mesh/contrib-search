@@ -62,11 +62,6 @@ func NewAPIBindingWatcherSubroutine(mgr mcmanager.Manager, orgsClient ctrlruntim
 		return nil, err
 	}
 
-	providerByGroup := make(map[string]string, len(cfg.SearchableResources))
-	for _, rss := range cfg.SearchableResources {
-		providerByGroup[rss.Group] = rss.Provider
-	}
-
 	return &apiBindingWatcherSubroutine{
 		mgr:         mgr,
 		orgsClient:  orgsClient,
