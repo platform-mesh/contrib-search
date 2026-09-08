@@ -46,12 +46,10 @@ import (
 
 // The apiBindingWatcherSubroutine only watches bindings of the Search export
 type apiBindingWatcherSubroutine struct {
-	mgr             mcmanager.Manager
-	orgsClient      ctrlruntimeclient.Client
-	rootCfg         *rest.Config
-	cfg             config.OperatorConfig
-	indexPrefix     string
-	providerByGroup map[string]string
+	mgr         mcmanager.Manager
+	orgsClient  ctrlruntimeclient.Client
+	rootCfg     *rest.Config
+	indexPrefix string
 }
 
 // NewAPIBindingWatcherSubroutine creates a new APIBinding watcher subroutine.
