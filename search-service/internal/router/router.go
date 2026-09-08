@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -31,6 +32,8 @@ import (
 	appcontext "go.platform-mesh.io/search-service/internal/context"
 	"go.platform-mesh.io/search-service/internal/service/search"
 )
+
+var fgaRelationPattern = regexp.MustCompile(`^[^:#@\s]{1,50}$`)
 
 type SearchService interface {
 	Search(ctx context.Context, req search.SearchRequest) (search.SearchResponse, error)
@@ -272,6 +275,9 @@ func parseSearchFilters(values map[string][]string) (map[string][]string, string
 	fgaRole := strings.TrimSpace(entries[0])
 	if fgaRole == "" {
 		return nil, "", fmt.Errorf("filter.fga_role must not be empty")
+	}
+	if !fgaRelationPattern.MatchString(fgaRole) {
+		return nil, "", fmt.Errorf("filter.fga_role has an invalid format")
 	}
 
 	delete(filters, "fga_role")

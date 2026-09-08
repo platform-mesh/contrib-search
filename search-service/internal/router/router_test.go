@@ -289,7 +289,7 @@ func TestCreateRouterSearchAcceptsFGARoleAcrossAllResources(t *testing.T) {
 	}
 }
 
-func TestCreateRouterSearchRejectsInvalidFGARoleCardinality(t *testing.T) {
+func TestCreateRouterSearchRejectsInvalidFGARole(t *testing.T) {
 	tests := []struct {
 		name  string
 		query string
@@ -297,6 +297,9 @@ func TestCreateRouterSearchRejectsInvalidFGARoleCardinality(t *testing.T) {
 		{name: "empty", query: "filter.fga_role="},
 		{name: "blank", query: "filter.fga_role=+"},
 		{name: "multiple", query: "filter.fga_role=owner&filter.fga_role=member"},
+		{name: "forbidden character", query: "filter.fga_role=account%3Aowner"},
+		{name: "internal whitespace", query: "filter.fga_role=account+owner"},
+		{name: "too long", query: "filter.fga_role=" + strings.Repeat("a", 51)},
 	}
 
 	for _, tt := range tests {
