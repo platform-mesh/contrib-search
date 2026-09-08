@@ -28,7 +28,7 @@ The service is organization-aware and derives org context from the request host.
 
 ### Search endpoint
 
-`GET /rest/v1/search?q=<query>&mode=<lexical|semantic>&limit=<n>&page=<n>&cursor=<opaque>&resource=<plural>&filter.<field>=<value>`
+`GET /rest/v1/search?q=<query>&mode=<lexical|semantic>&limit=<n>&page=<n>&cursor=<opaque>&resource=<plural>&filter.<field>=<value>&filter.fga_role=<relation>`
 
 Query params:
 
@@ -36,6 +36,7 @@ Query params:
 - `mode` (optional): search mode; `lexical` by default, `semantic` to use OpenSearch neural search on configured semantic fields
 - `resource` (optional for `lexical`, required for `semantic`): plural resource name; lexical mode can search across all resources, semantic mode must target a single resource
 - `filter.<field>` (optional, repeatable): exact-match filters; requires `resource`
+- `filter.fga_role` (optional, single value): restricts the account pre-filter to an arbitrary relation from the active OpenFGA account model, for example `owner`; unlike document filters, it can be used without `resource`. An empty, repeated, or schema-unknown relation is rejected with `400 Bad Request`
 - `limit` (optional): default `20`, max `100`
 - `page` (optional): 1-based result page using `limit` as the page size; used when `cursor` is omitted
 - `cursor` (optional): opaque pagination cursor
@@ -46,6 +47,10 @@ Before querying OpenSearch, the service resolves the accounts the caller can acc
 adds those exact account objects as an internal `filterable_fields.account_fga_object` filter. OpenSearch therefore
 returns the page-based `totalCount` directly for the caller's accessible account scope. Returned hits are still
 batch-checked with OpenFGA as a defense in depth measure.
+
+By default, account access is resolved with the configured `--openfga-default-role`. When `filter.fga_role` is
+provided, that relation is used for this request instead. The selected relation is also bound to the pagination
+cursor, so a cursor cannot be continued with a different role.
 
 Semantic mode behavior:
 
@@ -59,6 +64,10 @@ Examples:
 
 - Lexical search across all resources:
   - `GET /rest/v1/search?q=developer+portal`
+- Lexical search across resources in accounts where the caller is an owner:
+  - `GET /rest/v1/search?q=developer+portal&filter.fga_role=owner`
+- Lexical search within components, combining account role and document filters:
+  - `GET /rest/v1/search?q=developer+portal&resource=components&filter.fga_role=owner&filter.status=Ready`
 - Semantic search within one resource:
   - `GET /rest/v1/search?q=developer+portal&resource=components&mode=semantic`
 
@@ -144,7 +153,7 @@ Main runtime flags (with defaults):
 - `--searchindex-org-workspace-path` (default: `root:orgs`)
 - `--searchindex-group` (default: `search.platform-mesh.io`)
 - `--searchindex-version` (default: `v1alpha1`)
-- `--searchindex-resource` (default: `searchindexes`)
+- `--searchindex-resource` (default: `searchindices`)
 - `--search-default-limit` (default: `20`)
 - `--search-max-limit` (default: `100`)
 - `--search-fetch-batch-size` (default: `100`)
