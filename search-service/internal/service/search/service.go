@@ -18,6 +18,7 @@ package search
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -160,6 +161,13 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (SearchResponse
 	accountFGAObjects, err := s.authorizer.ListAccessibleAccounts(ctx, org, user, fgaRole)
 	s.metrics.AddOpenFGACalls(1)
 	if err != nil {
+		if fgaRole != "" && errors.Is(err, ErrFGARelationNotFound) {
+			return SearchResponse{}, fmt.Errorf(
+				"%w: relation %q is not defined in the OpenFGA account schema",
+				ErrInvalidRequest,
+				fgaRole,
+			)
+		}
 		log.Error().
 			Err(err).
 			Str("searchmode", mode).

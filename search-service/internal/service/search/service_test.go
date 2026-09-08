@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -243,6 +244,52 @@ func TestSearchUsesRequestedFGARoleForAccountPrefilter(t *testing.T) {
 	}
 	if len(searcher.reqs) != 1 || len(searcher.reqs[0].AccountFGAObjects) != 1 || searcher.reqs[0].AccountFGAObjects[0] != "core_platform-mesh_io_account:cluster/owned" {
 		t.Fatalf("expected owned account pre-filter, got %+v", searcher.reqs)
+	}
+}
+
+func TestSearchRejectsFGARoleMissingFromSchema(t *testing.T) {
+	searcher := &fakeSearcher{}
+	svc := NewService(
+		fakeResolver{index: SearchIndexRef{IndexName: "idx-acme"}},
+		searcher,
+		&fakeAuthorizer{accessibleErr: ErrFGARelationNotFound},
+		nil,
+		ServiceConfig{},
+	)
+
+	_, err := svc.Search(context.Background(), SearchRequest{
+		Organization: "acme",
+		User:         "alice@example.com",
+		Query:        "foo",
+		FGARole:      "owner",
+	})
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("expected ErrInvalidRequest, got %v", err)
+	}
+	if !strings.Contains(err.Error(), `relation "owner" is not defined in the OpenFGA account schema`) {
+		t.Fatalf("expected a clear missing-relation error, got %v", err)
+	}
+	if searcher.calls != 0 {
+		t.Fatalf("expected no OpenSearch calls, got %d", searcher.calls)
+	}
+}
+
+func TestSearchTreatsMissingDefaultFGARelationAsBackendFailure(t *testing.T) {
+	svc := NewService(
+		fakeResolver{index: SearchIndexRef{IndexName: "idx-acme"}},
+		&fakeSearcher{},
+		&fakeAuthorizer{accessibleErr: ErrFGARelationNotFound},
+		nil,
+		ServiceConfig{},
+	)
+
+	_, err := svc.Search(context.Background(), SearchRequest{
+		Organization: "acme",
+		User:         "alice@example.com",
+		Query:        "foo",
+	})
+	if !errors.Is(err, ErrBackend) {
+		t.Fatalf("expected ErrBackend, got %v", err)
 	}
 }
 
