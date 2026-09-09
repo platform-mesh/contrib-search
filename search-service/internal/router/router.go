@@ -78,7 +78,11 @@ func CreateRouter(svc SearchService, mws []func(http.Handler) http.Handler) *chi
 			return
 		}
 
-		resources := resolveResources(resource, r.URL.Query().Get("resources"), filters)
+		resources := resolveResources(
+			resource,
+			r.URL.Query().Get("resources"),
+			len(filters) != 0 || fgaRole != "",
+		)
 		if resources == nil {
 			http.Error(w, "Filtering is not supported for searching across all resources.", http.StatusBadRequest)
 			return
@@ -184,7 +188,7 @@ func CreateRouter(svc SearchService, mws []func(http.Handler) http.Handler) *chi
 //   - a single "resource" param wins,
 //   - otherwise a comma-separated "resources" param selects a subset,
 //   - otherwise a single empty resource lets the service search everything.
-func resolveResources(resource, resourcesParam string, filters map[string][]string) []string {
+func resolveResources(resource, resourcesParam string, hasFilters bool) []string {
 	if resource != "" {
 		return []string{resource}
 	}
@@ -193,7 +197,7 @@ func resolveResources(resource, resourcesParam string, filters map[string][]stri
 		return resources
 	}
 
-	if len(filters) != 0 {
+	if hasFilters {
 		return nil
 	}
 

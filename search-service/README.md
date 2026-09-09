@@ -28,15 +28,16 @@ The service is organization-aware and derives org context from the request host.
 
 ### Search endpoint
 
-`GET /rest/v1/search?q=<query>&mode=<lexical|semantic>&limit=<n>&page=<n>&cursor=<opaque>&resource=<plural>&filter.<field>=<value>&filter.fga_role=<relation>`
+`GET /rest/v1/search?q=<query>&mode=<lexical|semantic>&limit=<n>&page=<n>&cursor=<opaque>&resource=<plural>&resources=<plural,...>&filter.<field>=<value>&filter.fga_role=<relation>`
 
 Query params:
 
 - `q` (required): free-text query
 - `mode` (optional): search mode; `lexical` by default, `semantic` to use OpenSearch neural search on configured semantic fields
 - `resource` (optional for `lexical`, required for `semantic`): plural resource name; lexical mode can search across all resources, semantic mode must target a single resource
+- `resources` (optional): comma-separated resource names used when `resource` is omitted
 - `filter.<field>` (optional, repeatable): exact-match filters; requires `resource`
-- `filter.fga_role` (optional, single value): restricts the account pre-filter to an arbitrary relation from the active OpenFGA account model, for example `owner`; unlike document filters, it can be used without `resource`. An empty, repeated, or schema-unknown relation is rejected with `400 Bad Request`
+- `filter.fga_role` (optional, single value): restricts the account pre-filter to an arbitrary relation from the active OpenFGA account model, for example `owner`; requires an explicit target through `resource` or `resources`. An empty, repeated, malformed, or schema-unknown relation is rejected with `400 Bad Request`
 - `limit` (optional): default `20`, max `100`
 - `page` (optional): 1-based result page using `limit` as the page size; used when `cursor` is omitted
 - `cursor` (optional): opaque pagination cursor
@@ -64,8 +65,8 @@ Examples:
 
 - Lexical search across all resources:
   - `GET /rest/v1/search?q=developer+portal`
-- Lexical search across resources in accounts where the caller is an owner:
-  - `GET /rest/v1/search?q=developer+portal&filter.fga_role=owner`
+- Lexical search within components in accounts where the caller is an owner:
+  - `GET /rest/v1/search?q=developer+portal&resource=components&filter.fga_role=owner`
 - Lexical search within components, combining account role and document filters:
   - `GET /rest/v1/search?q=developer+portal&resource=components&filter.fga_role=owner&filter.status=Ready`
 - Semantic search within one resource:
