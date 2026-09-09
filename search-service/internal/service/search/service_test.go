@@ -573,7 +573,7 @@ func TestSearchRejectsCursorFromDifferentFGARole(t *testing.T) {
 		Org:         "acme",
 		QueryHash:   queryHash("foo"),
 		Mode:        SearchModeLexical,
-		FiltersHash: searchFiltersHash(nil, "owner"),
+		FiltersHash: cursorFiltersHash(nil, "owner"),
 		Limit:       20,
 		SearchAfter: []any{1.0, "x"},
 	})

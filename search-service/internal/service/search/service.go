@@ -144,7 +144,7 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (SearchResponse
 	}
 
 	qHash := queryHash(query)
-	fHash := searchFiltersHash(filters, fgaRole)
+	fHash := cursorFiltersHash(filters, fgaRole)
 	var searchAfter []any
 	if req.Cursor != "" {
 		decoded, err := DecodeCursor(req.Cursor)

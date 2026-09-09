@@ -63,7 +63,7 @@ func filtersHash(filters map[string][]string) string {
 	return hex.EncodeToString(h[:])
 }
 
-func searchFiltersHash(filters map[string][]string, fgaRole string) string {
+func cursorFiltersHash(filters map[string][]string, fgaRole string) string {
 	fgaRole = strings.TrimSpace(fgaRole)
 	if fgaRole == "" {
 		return filtersHash(filters)
