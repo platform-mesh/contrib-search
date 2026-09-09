@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -34,7 +33,6 @@ import (
 	"github.com/opensearch-project/opensearch-go/v4/opensearchutil"
 
 	"go.platform-mesh.io/golang-commons/logger"
-	"go.platform-mesh.io/search-operator/internal/config"
 	"go.platform-mesh.io/search-operator/internal/metrics"
 )
 
@@ -79,36 +77,9 @@ func NewClient(cfg Config) (*Client, error) {
 	return &Client{api: client}, nil
 }
 
-// NewClientFromEnv creates a new OpenSearch client using environment variables
-// OPENSEARCH_URL, OPENSEARCH_USERNAME, OPENSEARCH_PASSWORD
-func NewClientFromEnv(cfg *config.Config) (*Client, error) {
-	appConfig, err := config.NewFromEnv()
-	if err != nil {
-		fmt.Printf("Error loading env file: %v\n", err)
-		os.Exit(1)
-	}
-	url := os.Getenv("OPENSEARCH_URL")
-	if url == "" {
-		url = appConfig.OpenSearch.URL
-	}
-	fmt.Printf("url: %s", url)
-
-	insecure := os.Getenv("OPENSEARCH_INSECURE") == "true"
-	username := os.Getenv("OPENSEARCH_USERNAME")
-	if username == "" {
-		username = appConfig.OpenSearch.Username
-	}
-	password := os.Getenv("OPENSEARCH_PASSWORD")
-	if password == "" {
-		password = appConfig.OpenSearch.Password
-	}
-
-	return NewClient(Config{
-		URL:                url,
-		Username:           username,
-		Password:           password,
-		InsecureSkipVerify: insecure,
-	})
+// NewClientFromConfig creates a new OpenSearch client from the given Config.
+func NewClientFromConfig(cfg Config) (*Client, error) {
+	return NewClient(cfg)
 }
 
 func (c *Client) Ping(ctx context.Context) error {
