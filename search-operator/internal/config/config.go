@@ -25,39 +25,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-type gvkSliceValue struct {
-	target *[]schema.GroupVersionKind
-}
-
-func (g *gvkSliceValue) String() string {
-	parts := make([]string, len(*g.target))
-	for i, gvk := range *g.target {
-		parts[i] = gvk.Group + "/" + gvk.Version + "/" + gvk.Kind
-	}
-	return strings.Join(parts, ",")
-}
-
-func (g *gvkSliceValue) Set(val string) error {
-	for _, s := range strings.Split(val, ",") {
-		s = strings.TrimSpace(s)
-		if s == "" {
-			continue
-		}
-		parts := strings.SplitN(s, "/", 3)
-		if len(parts) != 3 {
-			return fmt.Errorf("invalid GVK %q: expected group/version/kind", s)
-		}
-		*g.target = append(*g.target, schema.GroupVersionKind{
-			Group:   parts[0],
-			Version: parts[1],
-			Kind:    parts[2],
-		})
-	}
-	return nil
-}
-
-func (g *gvkSliceValue) Type() string { return "gvkSlice" }
-
 type OperatorConfig struct {
 	KCPKubeconfig              string
 	APIExportEndpointSliceName string
@@ -78,6 +45,40 @@ func NewOperatorConfig() OperatorConfig {
 	}
 }
 
+// wrapper for `pflag.Value` interface
+type gvkSliceValue struct {
+	cfg *OperatorConfig
+}
+
+func (g *gvkSliceValue) String() string {
+	parts := make([]string, len(g.cfg.SearchableResources))
+	for i, gvk := range g.cfg.SearchableResources {
+		parts[i] = gvk.Group + "/" + gvk.Version + "/" + gvk.Kind
+	}
+	return strings.Join(parts, ",")
+}
+
+func (g *gvkSliceValue) Set(val string) error {
+	for _, s := range strings.Split(val, ",") {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		parts := strings.SplitN(s, "/", 3)
+		if len(parts) != 3 {
+			return fmt.Errorf("invalid GVK %q: expected group/version/kind", s)
+		}
+		g.cfg.SearchableResources = append(g.cfg.SearchableResources, schema.GroupVersionKind{
+			Group:   parts[0],
+			Version: parts[1],
+			Kind:    parts[2],
+		})
+	}
+	return nil
+}
+
+func (g *gvkSliceValue) Type() string { return "gvkSlice" }
+
 func (c *OperatorConfig) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.KCPKubeconfig, "kcp-kubeconfig", c.KCPKubeconfig, "Path to the kcp kubeconfig file")
 	fs.StringVar(&c.APIExportEndpointSliceName, "api-export-endpoint-slice-name", c.APIExportEndpointSliceName, "Name of the APIExportEndpointSlice to use for the multicluster provider")
@@ -87,5 +88,5 @@ func (c *OperatorConfig) AddFlags(fs *pflag.FlagSet) {
 	fs.BoolVar(&c.OpenSearchInsecure, "opensearch-insecure", c.OpenSearchInsecure, "Skip TLS certificate verification for OpenSearch (development only)")
 	fs.StringVar(&c.OpenSearchIndexNamePrefix, "opensearch-index-name-prefix", c.OpenSearchIndexNamePrefix, "Static prefix for all operator-managed OpenSearch index names and aliases")
 	fs.StringVar(&c.OpenSearchSemanticModelID, "opensearch-semantic-model-id", c.OpenSearchSemanticModelID, "OpenSearch ML model ID used for semantic field mappings (optional)")
-	fs.Var(&gvkSliceValue{target: &c.SearchableResources}, "searchable-resources", "Comma-separated list of GroupVersionKind values to index, each in group/version/kind format (repeatable)")
+	fs.Var(&gvkSliceValue{cfg: c}, "searchable-resources", "Comma-separated list of GroupVersionKind values to index, each in group/version/kind format (repeatable)")
 }
