@@ -27,6 +27,7 @@ import (
 	"testing"
 
 	appcontext "go.platform-mesh.io/search-service/internal/context"
+	"go.platform-mesh.io/search-service/internal/httperr"
 	"go.platform-mesh.io/search-service/internal/service/search"
 )
 
@@ -309,15 +310,58 @@ func TestCreateRouterFilterValuesEndpoint(t *testing.T) {
 
 func TestCreateRouterErrorMapping(t *testing.T) {
 	tests := []struct {
-		name   string
-		err    error
-		status int
+		name     string
+		err      error
+		status   int
+		category httperr.Category
+		problem  string
+		detail   string
 	}{
-		{name: "invalid", err: search.ErrInvalidCursor, status: http.StatusBadRequest},
-		{name: "unauthorized", err: search.ErrUnauthorized, status: http.StatusUnauthorized},
-		{name: "forbidden", err: search.ErrForbidden, status: http.StatusForbidden},
-		{name: "backend wrapped", err: fmt.Errorf("%w: opensearch", search.ErrBackend), status: http.StatusInternalServerError},
-		{name: "backend", err: errors.New("boom"), status: http.StatusInternalServerError},
+		{
+			name: "invalid cursor", err: fmt.Errorf("%w: org mismatch", search.ErrInvalidCursor),
+			status: http.StatusBadRequest, category: httperr.CategoryInvalidRequest,
+			problem: "invalid-cursor", detail: "org mismatch",
+		},
+		{
+			name: "invalid request", err: fmt.Errorf("%w: filters require a resource", search.ErrInvalidRequest),
+			status: http.StatusBadRequest, category: httperr.CategoryInvalidRequest,
+			problem: "invalid-request", detail: "filters require a resource",
+		},
+		{
+			name: "unauthorized", err: search.ErrUnauthorized,
+			status: http.StatusUnauthorized, category: httperr.CategoryAuthentication,
+			problem: "authentication-required",
+		},
+		{
+			name: "forbidden", err: search.ErrForbidden,
+			status: http.StatusForbidden, category: httperr.CategoryAuthorization,
+			problem: "access-denied",
+		},
+		{
+			name: "search backend", err: fmt.Errorf("%w: query OpenSearch: %v", search.ErrSearchBackend, errors.New("connection refused")),
+			status: http.StatusInternalServerError, category: httperr.CategorySearchBackend,
+			problem: "search-backend-unavailable",
+		},
+		{
+			name: "authorization backend", err: fmt.Errorf("%w: filter authorization: %v", search.ErrAuthzBackend, errors.New("openfga down")),
+			status: http.StatusInternalServerError, category: httperr.CategoryAuthorization,
+			problem: "authorization-unavailable",
+		},
+		{
+			name: "index unavailable", err: fmt.Errorf("%w: org %q", search.ErrIndexUnavailable, "acme"),
+			status: http.StatusInternalServerError, category: httperr.CategorySearchBackend,
+			problem: "index-unavailable",
+		},
+		{
+			name: "upstream timeout", err: fmt.Errorf("%w: query OpenSearch: %v", search.ErrUpstreamTimeout, context.DeadlineExceeded),
+			status: http.StatusInternalServerError, category: httperr.CategoryUpstreamTimeout,
+			problem: "upstream-timeout",
+		},
+		{
+			name: "unclassified", err: errors.New("boom"),
+			status: http.StatusInternalServerError, category: httperr.CategoryInternal,
+			problem: "internal-error",
+		},
 	}
 
 	for _, tc := range tests {
@@ -327,8 +371,137 @@ func TestCreateRouterErrorMapping(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/rest/v1/search?q=hello", nil)
 			rr := httptest.NewRecorder()
 			r.ServeHTTP(rr, req)
+
 			if rr.Code != tc.status {
 				t.Fatalf("expected %d, got %d body=%s", tc.status, rr.Code, strings.TrimSpace(rr.Body.String()))
+			}
+			if ct := rr.Header().Get("Content-Type"); ct != httperr.ContentType {
+				t.Fatalf("expected Content-Type %q, got %q", httperr.ContentType, ct)
+			}
+
+			var problem httperr.Problem
+			if err := json.Unmarshal(rr.Body.Bytes(), &problem); err != nil {
+				t.Fatalf("error body is not JSON: %v (body=%s)", err, rr.Body.String())
+			}
+			if problem.Category != tc.category {
+				t.Fatalf("expected category %q, got %q", tc.category, problem.Category)
+			}
+			if !strings.HasSuffix(problem.Type, "/"+tc.problem) {
+				t.Fatalf("expected type ending in %q, got %q", tc.problem, problem.Type)
+			}
+			if problem.Status != tc.status {
+				t.Fatalf("expected status member %d, got %d", tc.status, problem.Status)
+			}
+			if problem.Title == "" || problem.Detail == "" {
+				t.Fatalf("expected a title and detail, got %+v", problem)
+			}
+			if tc.detail != "" && problem.Detail != tc.detail {
+				t.Fatalf("expected detail %q, got %q", tc.detail, problem.Detail)
+			}
+			if problem.Instance != "/rest/v1/search" {
+				t.Fatalf("expected instance to be the request path, got %q", problem.Instance)
+			}
+		})
+	}
+}
+
+// The wrapped cause names the failing backend and must never reach the caller.
+func TestCreateRouterErrorDoesNotLeakBackendCause(t *testing.T) {
+	causes := []struct {
+		name   string
+		err    error
+		secret string
+	}{
+		{name: "opensearch", err: fmt.Errorf("%w: query OpenSearch: %v", search.ErrSearchBackend, errors.New("dial tcp 10.1.2.3:9200: connection refused")), secret: "10.1.2.3"},
+		{name: "openfga", err: fmt.Errorf("%w: list accessible accounts: %v", search.ErrAuthzBackend, errors.New("no OpenFGA store found")), secret: "OpenFGA"},
+		{name: "unclassified", err: errors.New("panic in kcp resolver: /clusters/root:orgs:acme"), secret: "kcp"},
+	}
+
+	for _, tc := range causes {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &fakeSearchService{err: tc.err}
+			r := CreateRouter(svc, []func(http.Handler) http.Handler{withRequestContext(appcontext.RequestContext{Organization: "acme", User: "alice@example.com"})})
+			req := httptest.NewRequest(http.MethodGet, "/rest/v1/search?q=topsecretquery", nil)
+			rr := httptest.NewRecorder()
+			r.ServeHTTP(rr, req)
+
+			body := rr.Body.String()
+			if strings.Contains(body, tc.secret) {
+				t.Fatalf("error body leaked %q: %s", tc.secret, body)
+			}
+			if strings.Contains(body, "topsecretquery") {
+				t.Fatalf("error body leaked the search query: %s", body)
+			}
+		})
+	}
+}
+
+func TestCreateRouterUnknownRouteReturnsProblem(t *testing.T) {
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		status int
+	}{
+		{name: "not found", method: http.MethodGet, path: "/rest/v1/nope", status: http.StatusNotFound},
+		{name: "method not allowed", method: http.MethodPost, path: "/rest/v1/search", status: http.StatusMethodNotAllowed},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := CreateRouter(&fakeSearchService{}, nil)
+			rr := httptest.NewRecorder()
+			r.ServeHTTP(rr, httptest.NewRequest(tc.method, tc.path, nil))
+
+			if rr.Code != tc.status {
+				t.Fatalf("expected %d, got %d", tc.status, rr.Code)
+			}
+			if ct := rr.Header().Get("Content-Type"); ct != httperr.ContentType {
+				t.Fatalf("expected Content-Type %q, got %q", httperr.ContentType, ct)
+			}
+
+			var problem httperr.Problem
+			if err := json.Unmarshal(rr.Body.Bytes(), &problem); err != nil {
+				t.Fatalf("error body is not JSON: %v (body=%s)", err, rr.Body.String())
+			}
+			if problem.Status != tc.status || problem.Type == "" {
+				t.Fatalf("unexpected problem: %+v", problem)
+			}
+		})
+	}
+}
+
+func TestCreateRouterInvalidParamsReturnProblem(t *testing.T) {
+	tests := []struct {
+		name   string
+		query  string
+		detail string
+	}{
+		{name: "limit", query: "q=hello&limit=abc", detail: "limit must be an integer"},
+		{name: "page", query: "q=hello&page=0", detail: "page must be a positive integer"},
+		{name: "filter field", query: "q=hello&filter.=value", detail: "invalid filter field"},
+		{name: "filter without resource", query: "q=hello&filter.type=premium", detail: "filtering is not supported when searching across all resources"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := CreateRouter(&fakeSearchService{}, []func(http.Handler) http.Handler{withRequestContext(appcontext.RequestContext{Organization: "acme", User: "alice@example.com"})})
+			rr := httptest.NewRecorder()
+			r.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/rest/v1/search?"+tc.query, nil))
+
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
+			}
+
+			var problem httperr.Problem
+			if err := json.Unmarshal(rr.Body.Bytes(), &problem); err != nil {
+				t.Fatalf("error body is not JSON: %v (body=%s)", err, rr.Body.String())
+			}
+			if problem.Category != httperr.CategoryInvalidRequest {
+				t.Fatalf("expected category %q, got %q", httperr.CategoryInvalidRequest, problem.Category)
+			}
+			if problem.Detail != tc.detail {
+				t.Fatalf("expected detail %q, got %q", tc.detail, problem.Detail)
 			}
 		})
 	}
@@ -382,5 +555,27 @@ func TestCreateRouterResourceParamTakesPrecedence(t *testing.T) {
 	}
 	if len(svc.reqs) != 1 || svc.reqs[0].Resource != "accounts" {
 		t.Fatalf("expected single search for accounts, got %v", svc.reqs)
+	}
+}
+
+func TestErrorContractAcrossEndpoints(t *testing.T) {
+	for _, path := range []string{"/rest/v1/search?resource=accounts", "/rest/v1/search/resources", "/rest/v1/search/filter-values?resource=accounts&field=name"} {
+		t.Run(path, func(t *testing.T) {
+			cause := fmt.Errorf("%w: secret backend query", search.ErrSearchBackend)
+			svc := &fakeSearchService{err: cause, resourcesErr: cause, filterValuesErr: cause}
+			r := CreateRouter(svc, []func(http.Handler) http.Handler{withRequestContext(appcontext.RequestContext{Organization: "acme", User: "alice"})})
+			rr := httptest.NewRecorder()
+			r.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
+			var p httperr.Problem
+			if err := json.Unmarshal(rr.Body.Bytes(), &p); err != nil {
+				t.Fatal(err)
+			}
+			if rr.Code != 500 || p.Status != 500 || p.Category != httperr.CategorySearchBackend || p.Type == "" || p.Title == "" || rr.Header().Get("Content-Type") != "application/json" {
+				t.Fatalf("unexpected error contract: %d %s", rr.Code, rr.Body.String())
+			}
+			if strings.Contains(rr.Body.String(), "secret") {
+				t.Fatal("backend details leaked")
+			}
+		})
 	}
 }

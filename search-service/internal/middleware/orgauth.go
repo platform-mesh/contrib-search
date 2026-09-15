@@ -26,6 +26,7 @@ import (
 	pmcontext "go.platform-mesh.io/golang-commons/context"
 	"go.platform-mesh.io/golang-commons/logger"
 	appcontext "go.platform-mesh.io/search-service/internal/context"
+	"go.platform-mesh.io/search-service/internal/httperr"
 	"go.platform-mesh.io/search-service/internal/service/search"
 )
 
@@ -61,7 +62,7 @@ func (o *OrgContextMiddleware) SetRequestContext() func(http.Handler) http.Handl
 
 			org := extractSubdomain(r.Host)
 			if org == "" {
-				http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+				httperr.Write(w, r, httperr.AuthenticationRequired)
 				return
 			}
 
@@ -71,19 +72,19 @@ func (o *OrgContextMiddleware) SetRequestContext() func(http.Handler) http.Handl
 
 			token, err := pmcontext.GetWebTokenFromContext(ctx)
 			if err != nil {
-				http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+				httperr.Write(w, r, httperr.AuthenticationRequired)
 				return
 			}
 
 			if !o.localDevelopment {
 				authHeader, err := pmcontext.GetAuthHeaderFromContext(ctx)
 				if err != nil {
-					http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+					httperr.Write(w, r, httperr.AuthenticationRequired)
 					return
 				}
 				authHeader, err = normalizeBearerAuthHeader(authHeader)
 				if err != nil {
-					http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+					httperr.Write(w, r, httperr.AuthenticationRequired)
 					return
 				}
 
@@ -93,11 +94,11 @@ func (o *OrgContextMiddleware) SetRequestContext() func(http.Handler) http.Handl
 						Err(err).
 						Str("organization", org).
 						Msg("failed to validate JWT")
-					http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+					httperr.Write(w, r, httperr.AuthenticationUnavailable)
 					return
 				}
 				if !valid {
-					http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+					httperr.Write(w, r, httperr.AuthenticationRequired)
 					return
 				}
 			}
@@ -105,13 +106,13 @@ func (o *OrgContextMiddleware) SetRequestContext() func(http.Handler) http.Handl
 			user, found := token.Claims.String(o.userClaim)
 			user = strings.TrimSpace(user)
 			if !found || user == "" {
-				http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+				httperr.Write(w, r, httperr.AuthenticationRequired)
 				return
 			}
 
 			tenant, err := extractTenant(token.Issuer)
 			if err != nil {
-				http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+				httperr.Write(w, r, httperr.AuthenticationRequired)
 				return
 			}
 
