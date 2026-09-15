@@ -123,7 +123,7 @@ func RunController(_ *cobra.Command, _ []string) { // coverage-ignore
 
 	for _, gvk := range operatorCfg.SearchableResources {
 		obj := &unstructured.Unstructured{}
-		obj.SetGroupVersionKind(gvk.GroupVersionKind)
+		obj.SetGroupVersionKind(gvk)
 		idxReconciler, err := controller.NewIndexableResource(
 			log, operatorCfg, mgr, osClient, operatorCfg.APIExportEndpointSliceName, obj)
 		if err != nil {
