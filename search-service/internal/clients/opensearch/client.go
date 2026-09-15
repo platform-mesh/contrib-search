@@ -174,7 +174,6 @@ func BuildQueryBody(req search.OpenSearchQuery) ([]byte, error) {
 			delete(body, "sort")
 		}
 	}
-
 	return json.Marshal(body)
 }
 

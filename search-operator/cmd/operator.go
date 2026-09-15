@@ -121,9 +121,9 @@ func RunController(_ *cobra.Command, _ []string) { // coverage-ignore
 		log.Fatal().Err(err).Str("controller", "SearchIndex").Msg("unable to create controller")
 	}
 
-	for _, gvk := range operatorCfg.SearchableResources {
+	for _, GVK := range operatorCfg.SearchableResources {
 		obj := &unstructured.Unstructured{}
-		obj.SetGroupVersionKind(gvk.GroupVersionKind)
+		obj.SetGroupVersionKind(GVK)
 		idxReconciler, err := controller.NewIndexableResource(
 			log, operatorCfg, mgr, osClient, operatorCfg.APIExportEndpointSliceName, obj)
 		if err != nil {
