@@ -16,12 +16,42 @@ limitations under the License.
 
 package search
 
-import "errors"
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
 
 var (
-	ErrInvalidRequest = errors.New("invalid request")
-	ErrInvalidCursor  = errors.New("invalid cursor")
-	ErrUnauthorized   = errors.New("unauthorized")
-	ErrForbidden      = errors.New("forbidden")
-	ErrBackend        = errors.New("backend failure")
+	ErrInvalidRequest   = errors.New("invalid request")
+	ErrInvalidCursor    = errors.New("invalid cursor")
+	ErrUnauthorized     = errors.New("unauthorized")
+	ErrForbidden        = errors.New("forbidden")
+	ErrSearchBackend    = errors.New("search backend failure")
+	ErrAuthzBackend     = errors.New("authorization backend failure")
+	ErrIndexUnavailable = errors.New("no search index available")
+	ErrUpstreamTimeout  = errors.New("upstream timeout")
 )
+
+// backendErr wraps an upstream failure, except for timeouts:
+// those get ErrUpstreamTimeout regardless of which backend stalled, because a
+// caller retries a timeout but not a hard backend failure.
+func backendErr(sentinel error, op string, err error) error {
+	if isTimeout(err) {
+		return fmt.Errorf("%w: %s: %v", ErrUpstreamTimeout, op, err)
+	}
+	return fmt.Errorf("%w: %s: %v", sentinel, op, err)
+}
+
+func isTimeout(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) || status.Code(err) == codes.DeadlineExceeded {
+		return true
+	}
+
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
+}

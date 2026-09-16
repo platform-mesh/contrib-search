@@ -17,6 +17,7 @@
 - `internal/clients/kcp`: kcp clients for org access validation and `SearchIndex` resolution.
 - `internal/clients/opensearch`: OpenSearch client integration.
 - `internal/clients/fga`: OpenFGA authorization filtering.
+- `internal/httperr`: the RFC 9457 problem details returned by every error response.
 - `internal/middleware`, `internal/context`, `internal/observability`: request context and service instrumentation.
 
 ## Architecture
@@ -40,6 +41,7 @@ This is an HTTP service, not an operator.
 
 ## Code Conventions
 - Keep transport logic in `internal/router` and business logic in `internal/service/search`.
+- Return errors as `internal/httperr` problems; never write an error body by hand. Backend causes are logged, not sent - only the invalid-request family forwards its own text to the caller.
 - Preserve validation, cursor encoding, and authz filtering invariants when changing the search flow.
 - Add or update `_test.go` files alongside behavior changes.
 - Keep logs and errors structured, and avoid exposing secrets or unnecessary backend detail.

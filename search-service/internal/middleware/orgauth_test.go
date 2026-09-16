@@ -18,9 +18,11 @@ package middleware
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-jose/go-jose/v4"
@@ -31,6 +33,7 @@ import (
 	pmjwt "go.platform-mesh.io/golang-commons/jwt"
 	pmmw "go.platform-mesh.io/golang-commons/middleware"
 	appcontext "go.platform-mesh.io/search-service/internal/context"
+	"go.platform-mesh.io/search-service/internal/httperr"
 )
 
 var testJWTSigningKey = []byte("0123456789abcdef0123456789abcdef")
@@ -449,5 +452,106 @@ func TestNewOrgContextMiddlewareFallsBackToDefaultLocalOrg(t *testing.T) {
 	}
 	if validator.calls != 0 {
 		t.Fatalf("validator must not be called in local development mode")
+	}
+}
+
+// The middleware rejects before the router runs, so it has to emit the same
+// problem details the handlers do rather than net/http's text/plain default.
+func TestSetRequestContextRejectionsAreProblemDetails(t *testing.T) {
+	validToken := map[string]any{
+		"iss":   "https://idp.example.org/auth/realms/acme-tenant",
+		"email": "user@example.org",
+	}
+
+	tests := []struct {
+		name      string
+		host      string
+		authHdr   string
+		claims    map[string]any
+		validator *fakeOrgValidator
+		status    int
+		category  httperr.Category
+		problem   string
+	}{
+		{
+			name: "missing org subdomain", host: ".platform-mesh.io:8443", authHdr: "Bearer abc",
+			claims: validToken, validator: &fakeOrgValidator{valid: true},
+			status: http.StatusUnauthorized, category: httperr.CategoryAuthentication,
+			problem: "authentication-required",
+		},
+		{
+			name: "malformed authorization header", host: "acme.platform-mesh.io:8443", authHdr: "Basic abc",
+			claims: validToken, validator: &fakeOrgValidator{valid: true},
+			status: http.StatusUnauthorized, category: httperr.CategoryAuthentication,
+			problem: "authentication-required",
+		},
+		{
+			name: "token rejected for org", host: "acme.platform-mesh.io:8443", authHdr: "Bearer abc",
+			claims: validToken, validator: &fakeOrgValidator{valid: false},
+			status: http.StatusUnauthorized, category: httperr.CategoryAuthentication,
+			problem: "authentication-required",
+		},
+		{
+			name: "user claim missing", host: "acme.platform-mesh.io:8443", authHdr: "Bearer abc",
+			claims:    map[string]any{"iss": "https://idp.example.org/auth/realms/acme-tenant"},
+			validator: &fakeOrgValidator{valid: true},
+			status:    http.StatusUnauthorized, category: httperr.CategoryAuthentication,
+			problem: "authentication-required",
+		},
+		{
+			name: "issuer without realm", host: "acme.platform-mesh.io:8443", authHdr: "Bearer abc",
+			claims:    map[string]any{"iss": "https://idp.example.org", "email": "user@example.org"},
+			validator: &fakeOrgValidator{valid: true},
+			status:    http.StatusUnauthorized, category: httperr.CategoryAuthentication,
+			problem: "authentication-required",
+		},
+		{
+			name: "validator failure", host: "acme.platform-mesh.io:8443", authHdr: "Bearer abc",
+			claims: validToken, validator: &fakeOrgValidator{err: errors.New("kcp unreachable")},
+			status: http.StatusInternalServerError, category: httperr.CategoryAuthentication,
+			problem: "authentication-unavailable",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mw := NewOrgContextMiddleware(tt.validator, false, "local", "email")
+
+			req := httptest.NewRequest(http.MethodGet, "/rest/v1/search?q=topsecretquery", nil)
+			req.Host = tt.host
+			ctx := pmcontext.AddAuthHeaderToContext(req.Context(), tt.authHdr)
+			ctx = context.WithValue(ctx, keys.WebTokenCtxKey, newWebToken(t, tt.claims))
+			req = req.WithContext(ctx)
+
+			rr := httptest.NewRecorder()
+			next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				t.Fatal("next handler must not run on a rejected request")
+			})
+			mw.SetRequestContext()(next).ServeHTTP(rr, req)
+
+			if rr.Code != tt.status {
+				t.Fatalf("expected %d, got %d body=%s", tt.status, rr.Code, rr.Body.String())
+			}
+			if ct := rr.Header().Get("Content-Type"); ct != httperr.ContentType {
+				t.Fatalf("expected Content-Type %q, got %q", httperr.ContentType, ct)
+			}
+
+			var problem httperr.Problem
+			if err := json.Unmarshal(rr.Body.Bytes(), &problem); err != nil {
+				t.Fatalf("error body is not JSON: %v (body=%s)", err, rr.Body.String())
+			}
+			if problem.Category != tt.category {
+				t.Fatalf("expected category %q, got %q", tt.category, problem.Category)
+			}
+			if !strings.HasSuffix(problem.Type, "/"+tt.problem) {
+				t.Fatalf("expected type ending in %q, got %q", tt.problem, problem.Type)
+			}
+			if problem.Status != tt.status {
+				t.Fatalf("expected status member %d, got %d", tt.status, problem.Status)
+			}
+			if body := rr.Body.String(); strings.Contains(body, "kcp") || strings.Contains(body, "topsecretquery") {
+				t.Fatalf("error body leaked internals: %s", body)
+			}
+		})
 	}
 }
