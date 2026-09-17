@@ -27,6 +27,7 @@ import (
 	"go.platform-mesh.io/search-operator/internal/opensearch"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/multicluster-runtime/pkg/multicluster"
 )
 
@@ -218,6 +219,59 @@ func TestMapResourceToFGAObject(t *testing.T) {
 					gotGroup, gotKind, gotCluster,
 					tt.wantGroup, tt.wantKind, tt.wantCluster,
 				)
+			}
+		})
+	}
+}
+
+func TestResolveAccountFGAObject(t *testing.T) {
+	accountInfo := &pmcorev1alpha1.AccountInfo{
+		Spec: pmcorev1alpha1.AccountInfoSpec{
+			Account: pmcorev1alpha1.AccountLocation{
+				Name:            "teams",
+				OriginClusterId: "account-origin",
+			},
+			Organization: pmcorev1alpha1.AccountLocation{
+				Name:            "sap",
+				OriginClusterId: "org-origin",
+			},
+		},
+	}
+
+	tests := []struct {
+		name              string
+		gvk               schema.GroupVersionKind
+		resourceClusterID multicluster.ClusterName
+		resourceName      string
+		want              string
+	}{
+		{
+			name:              "regular resource uses the account it lives in",
+			gvk:               schema.GroupVersionKind{Group: pmcorev1alpha1.GroupName, Kind: "Component"},
+			resourceClusterID: "component-cluster",
+			resourceName:      "my-component",
+			want:              "core_platform-mesh_io_account:account-origin/teams",
+		},
+		{
+			name:              "account resource uses itself, not its parent",
+			gvk:               schema.GroupVersionKind{Group: pmcorev1alpha1.GroupName, Kind: pmsearchv1alpha1.AccountKind},
+			resourceClusterID: "account-origin",
+			resourceName:      "workspace-a",
+			want:              "core_platform-mesh_io_account:account-origin/workspace-a",
+		},
+		{
+			name:              "account kind in another group is not treated as an account",
+			gvk:               schema.GroupVersionKind{Group: "other.platform-mesh.io", Kind: pmsearchv1alpha1.AccountKind},
+			resourceClusterID: "other-cluster",
+			resourceName:      "workspace-a",
+			want:              "core_platform-mesh_io_account:account-origin/teams",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveAccountFGAObject(tt.gvk, tt.resourceClusterID, tt.resourceName, accountInfo); got != tt.want {
+				t.Fatalf("resolveAccountFGAObject() = %q, want %q", got, tt.want)
 			}
 		})
 	}

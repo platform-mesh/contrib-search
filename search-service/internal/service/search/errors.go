@@ -35,6 +35,8 @@ var (
 	ErrAuthzBackend     = errors.New("authorization backend failure")
 	ErrIndexUnavailable = errors.New("no search index available")
 	ErrUpstreamTimeout  = errors.New("upstream timeout")
+
+	ErrFGARelationNotFound = errors.New("OpenFGA relation not found")
 )
 
 // backendErr wraps an upstream failure, except for timeouts:
