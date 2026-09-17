@@ -27,22 +27,25 @@ import (
 )
 
 var (
-	ErrInvalidRequest   = errors.New("invalid request")
-	ErrInvalidCursor    = errors.New("invalid cursor")
-	ErrUnauthorized     = errors.New("unauthorized")
-	ErrForbidden        = errors.New("forbidden")
-	ErrSearchBackend    = errors.New("search backend failure")
-	ErrAuthzBackend     = errors.New("authorization backend failure")
-	ErrIndexUnavailable = errors.New("no search index available")
-	ErrUpstreamTimeout  = errors.New("upstream timeout")
+	ErrInvalidRequest        = errors.New("invalid request")
+	ErrInvalidCursor         = errors.New("invalid cursor")
+	ErrUnauthorized          = errors.New("unauthorized")
+	ErrForbidden             = errors.New("forbidden")
+	ErrSearchBackend         = errors.New("search backend failure")
+	ErrAuthzBackend          = errors.New("authorization backend failure")
+	ErrIndexUnavailable      = errors.New("no search index available")
+	ErrUpstreamTimeout       = errors.New("upstream timeout")
+	ErrSearchBackendRejected = errors.New("search backend rejected the request")
 )
 
-// backendErr wraps an upstream failure, except for timeouts:
-// those get ErrUpstreamTimeout regardless of which backend stalled, because a
-// caller retries a timeout but not a hard backend failure.
+// backendErr wraps an upstream failure, except for timeouts and rejected queries:
+// those get ErrUpstreamTimeout or ErrSearchBackendRejected
 func backendErr(sentinel error, op string, err error) error {
 	if isTimeout(err) {
 		return fmt.Errorf("%w: %s: %v", ErrUpstreamTimeout, op, err)
+	}
+	if errors.Is(err, ErrSearchBackendRejected) {
+		sentinel = ErrSearchBackendRejected
 	}
 	return fmt.Errorf("%w: %s: %v", sentinel, op, err)
 }

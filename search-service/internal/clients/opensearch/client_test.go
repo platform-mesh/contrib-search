@@ -19,8 +19,10 @@ package opensearch
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"go.platform-mesh.io/search-service/internal/service/search"
@@ -85,6 +87,12 @@ func TestBuildQueryBodyWithoutSearchAfter(t *testing.T) {
 
 	query := payload["query"].(map[string]any)
 	simple := query["simple_query_string"].(map[string]any)
+	// Indices disagree on the type of a dynamically mapped default_fields.* path:
+	// without lenient, a text query against the index that mapped it as long
+	// fails the whole request with number_format_exception.
+	if simple["lenient"] != true {
+		t.Fatalf("lenient = %v, want true", simple["lenient"])
+	}
 	fields := simple["fields"].([]any)
 	if fields[0] != "account_name" || fields[1] != "api_group" {
 		t.Fatalf("expected default lexical fields first, got %v", fields)
@@ -239,6 +247,132 @@ func TestBuildQueryBodyAggregationUsesFilterableFieldPrefix(t *testing.T) {
 	}
 	if got := payload["size"]; got != float64(0) {
 		t.Fatalf("size = %v, want 0", got)
+	}
+}
+
+// A mapping conflict fails only the shards that hold the conflicting index, and
+// OpenSearch still answers 200. The page has to carry that, or a partial result
+// is indistinguishable from a complete one with a smaller total.
+func TestClientSearchSurfacesShardFailures(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"timed_out": false,
+			"_shards": {"total": 3, "successful": 2, "skipped": 0, "failed": 1, "failures": [
+				{"index": "idx-b", "reason": {"type": "number_format_exception", "reason": "For input string: \"test\""}},
+				{"index": "idx-b", "reason": {"type": "number_format_exception", "reason": "For input string: \"test\""}}
+			]},
+			"hits": {"total": {"value": 7, "relation": "eq"}, "hits": []}
+		}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(Config{URL: server.URL})
+	if err != nil {
+		t.Fatalf("NewClient returned error: %v", err)
+	}
+	page, err := client.Search(context.Background(), search.OpenSearchQuery{
+		Indices: []string{"idx-a", "idx-b"},
+		Query:   "test",
+		Size:    10,
+	})
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+
+	if !page.Partial() {
+		t.Fatalf("Partial() = false, want true")
+	}
+	if page.ShardsTotal != 3 || page.ShardsFailed != 1 {
+		t.Fatalf("shards total/failed = %d/%d, want 3/1", page.ShardsTotal, page.ShardsFailed)
+	}
+	if len(page.ShardFailures) != 1 {
+		t.Fatalf("ShardFailures = %v, want the duplicate reason collapsed to one", page.ShardFailures)
+	}
+	if want := `idx-b: number_format_exception: For input string: "test"`; page.ShardFailures[0] != want {
+		t.Fatalf("ShardFailures[0] = %q, want %q", page.ShardFailures[0], want)
+	}
+}
+
+func TestClientSearchCompleteResponseIsNotPartial(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"timed_out":false,"_shards":{"total":2,"successful":2,"failed":0},"hits":{"total":{"value":1},"hits":[]}}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(Config{URL: server.URL})
+	if err != nil {
+		t.Fatalf("NewClient returned error: %v", err)
+	}
+	page, err := client.Search(context.Background(), search.OpenSearchQuery{Indices: []string{"idx"}, Size: 10})
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+	if page.Partial() {
+		t.Fatalf("Partial() = true for a fully successful response")
+	}
+	if page.ShardFailures != nil {
+		t.Fatalf("ShardFailures = %v, want nil", page.ShardFailures)
+	}
+}
+
+func TestClientSearchTimedOutIsPartial(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"timed_out":true,"_shards":{"total":2,"successful":2,"failed":0},"hits":{"total":{"value":1},"hits":[]}}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(Config{URL: server.URL})
+	if err != nil {
+		t.Fatalf("NewClient returned error: %v", err)
+	}
+	page, err := client.Search(context.Background(), search.OpenSearchQuery{Indices: []string{"idx"}, Size: 10})
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+	if !page.Partial() {
+		t.Fatalf("Partial() = false for a timed-out response")
+	}
+}
+
+// A 4xx is a query we built wrong; a 5xx is a backend that is down. They map to
+// different sentinels so the router can tell the caller which one happened.
+func TestClientSearchErrorStatusSentinels(t *testing.T) {
+	tests := []struct {
+		name         string
+		status       int
+		wantSentinel error
+		otherErr     error
+	}{
+		{"rejected query", http.StatusBadRequest, search.ErrSearchBackendRejected, search.ErrSearchBackend},
+		{"backend down", http.StatusServiceUnavailable, search.ErrSearchBackend, search.ErrSearchBackendRejected},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(`{"error":{"type":"number_format_exception"}}`))
+			}))
+			defer server.Close()
+
+			client, err := NewClient(Config{URL: server.URL})
+			if err != nil {
+				t.Fatalf("NewClient returned error: %v", err)
+			}
+			_, err = client.Search(context.Background(), search.OpenSearchQuery{Indices: []string{"idx"}, Query: "test", Size: 10})
+			if err == nil {
+				t.Fatalf("Search returned no error for status %d", tt.status)
+			}
+			if !errors.Is(err, tt.wantSentinel) {
+				t.Fatalf("error %v does not match %v", err, tt.wantSentinel)
+			}
+			if errors.Is(err, tt.otherErr) {
+				t.Fatalf("error %v unexpectedly matches %v", err, tt.otherErr)
+			}
+			if !strings.Contains(err.Error(), "number_format_exception") {
+				t.Fatalf("error %v drops the upstream body", err)
+			}
+		})
 	}
 }
 

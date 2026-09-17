@@ -343,6 +343,11 @@ func TestCreateRouterErrorMapping(t *testing.T) {
 			problem: "search-backend-unavailable",
 		},
 		{
+			name: "search backend rejected the query", err: fmt.Errorf("%w: query OpenSearch: %v", search.ErrSearchBackendRejected, errors.New("status 400: number_format_exception")),
+			status: http.StatusInternalServerError, category: httperr.CategorySearchBackend,
+			problem: "search-query-rejected",
+		},
+		{
 			name: "authorization backend", err: fmt.Errorf("%w: filter authorization: %v", search.ErrAuthzBackend, errors.New("openfga down")),
 			status: http.StatusInternalServerError, category: httperr.CategoryAuthorization,
 			problem: "authorization-unavailable",
@@ -414,6 +419,7 @@ func TestCreateRouterErrorDoesNotLeakBackendCause(t *testing.T) {
 	}{
 		{name: "opensearch", err: fmt.Errorf("%w: query OpenSearch: %v", search.ErrSearchBackend, errors.New("dial tcp 10.1.2.3:9200: connection refused")), secret: "10.1.2.3"},
 		{name: "openfga", err: fmt.Errorf("%w: list accessible accounts: %v", search.ErrAuthzBackend, errors.New("no OpenFGA store found")), secret: "OpenFGA"},
+		{name: "rejected query", err: fmt.Errorf("%w: query OpenSearch: %v", search.ErrSearchBackendRejected, errors.New(`status 400: {"index":"search-acme-components","reason":"failed to parse field [default_fields.replicas]"}`)), secret: "default_fields.replicas"},
 		{name: "unclassified", err: errors.New("panic in kcp resolver: /clusters/root:orgs:acme"), secret: "kcp"},
 	}
 

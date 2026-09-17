@@ -31,7 +31,11 @@ import (
 	"time"
 
 	"go.platform-mesh.io/search-service/internal/service/search"
+	"go.platform-mesh.io/search-service/internal/strings"
 )
+
+// maxShardFailureReasons caps the failure messages from partial responses
+const maxShardFailureReasons = 5
 
 type Config struct {
 	URL      string
@@ -83,9 +87,9 @@ func BuildQueryBody(req search.OpenSearchQuery) ([]byte, error) {
 		return nil, err
 	}
 	fields := lexicalSearchFields(req.Fields)
-	semanticFields := prefixedFields("semantic_fields", dedupeStrings(req.SemanticFields))
+	semanticFields := prefixedFields("semantic_fields", strings.DedupeSorted(req.SemanticFields))
 	filters := normalizeFilters(req.Filters)
-	accountFGAObjects := dedupeStrings(req.AccountFGAObjects)
+	accountFGAObjects := strings.DedupeSorted(req.AccountFGAObjects)
 
 	var queryClause map[string]any
 	if query == "" {
@@ -101,6 +105,7 @@ func BuildQueryBody(req search.OpenSearchQuery) ([]byte, error) {
 		simple := map[string]any{
 			"query":            query,
 			"default_operator": "and",
+			"lenient":          true,
 		}
 		if len(fields) > 0 {
 			simple["fields"] = fields
@@ -223,7 +228,7 @@ func searchMode(raw string) (string, error) {
 }
 
 func (c *Client) Search(ctx context.Context, query search.OpenSearchQuery) (search.OpenSearchPage, error) {
-	indices := dedupeStrings(query.Indices)
+	indices := strings.DedupeSorted(query.Indices)
 	if len(indices) == 0 {
 		return search.OpenSearchPage{}, fmt.Errorf("at least one OpenSearch index is required")
 	}
@@ -264,10 +269,29 @@ func (c *Client) Search(ctx context.Context, query search.OpenSearchQuery) (sear
 
 	if resp.StatusCode >= http.StatusBadRequest {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
-		return search.OpenSearchPage{}, fmt.Errorf("OpenSearch request failed with status %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+		// A 4xx means OpenSearch rejected the query we built
+		sentinel := search.ErrSearchBackend
+		if resp.StatusCode < http.StatusInternalServerError {
+			sentinel = search.ErrSearchBackendRejected
+		}
+		return search.OpenSearchPage{}, fmt.Errorf("%w: status %d: %s", sentinel, resp.StatusCode, strings.TrimSpace(string(raw)))
 	}
 
 	var payload struct {
+		TimedOut bool `json:"timed_out"`
+		Shards   struct {
+			Total      int `json:"total"`
+			Successful int `json:"successful"`
+			Skipped    int `json:"skipped"`
+			Failed     int `json:"failed"`
+			Failures   []struct {
+				Index  string `json:"index"`
+				Reason struct {
+					Type   string `json:"type"`
+					Reason string `json:"reason"`
+				} `json:"reason"`
+			} `json:"failures"`
+		} `json:"_shards"`
 		Hits struct {
 			Total struct {
 				Value int `json:"value"`
@@ -312,33 +336,33 @@ func (c *Client) Search(ctx context.Context, query search.OpenSearchQuery) (sear
 		slices.Sort(values)
 	}
 
+	// Process OpenSearch shard errors: if some shards fail, hits and TotalCount
+	// can be partial. If all shards fail (e.g. mapping errors) we need to dedupe the messages
+	var shardFailures []string
+	seenFailures := make(map[string]struct{}, len(payload.Shards.Failures))
+	for _, failure := range payload.Shards.Failures {
+		reason := strings.TrimSpace(fmt.Sprintf("%s: %s: %s", failure.Index, failure.Reason.Type, failure.Reason.Reason))
+		if _, ok := seenFailures[reason]; ok {
+			continue
+		}
+
+		seenFailures[reason] = struct{}{}
+		if len(shardFailures) == maxShardFailureReasons {
+			break
+		}
+
+		shardFailures = append(shardFailures, reason)
+	}
+
 	return search.OpenSearchPage{
 		Hits:              hits,
 		AggregationValues: values,
 		TotalCount:        payload.Hits.Total.Value,
+		TimedOut:          payload.TimedOut,
+		ShardsTotal:       payload.Shards.Total,
+		ShardsFailed:      payload.Shards.Failed,
+		ShardFailures:     shardFailures,
 	}, nil
-}
-
-func dedupeStrings(values []string) []string {
-	if len(values) == 0 {
-		return nil
-	}
-
-	seen := make(map[string]struct{}, len(values))
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		trimmed := strings.TrimSpace(value)
-		if trimmed == "" {
-			continue
-		}
-		if _, ok := seen[trimmed]; ok {
-			continue
-		}
-		seen[trimmed] = struct{}{}
-		out = append(out, trimmed)
-	}
-	slices.Sort(out)
-	return out
 }
 
 func normalizeFilters(filters map[string][]string) map[string][]string {
@@ -353,7 +377,7 @@ func normalizeFilters(filters map[string][]string) map[string][]string {
 			continue
 		}
 
-		values := dedupeStrings(rawValues)
+		values := strings.DedupeSorted(rawValues)
 		if len(values) == 0 {
 			continue
 		}
@@ -376,12 +400,12 @@ func prefixedFields(prefix string, fields []string) []string {
 			out = append(out, prefixed)
 		}
 	}
-	return dedupeStrings(out)
+	return strings.DedupeSorted(out)
 }
 
 func lexicalSearchFields(fields []string) []string {
-	prefixed := prefixedFields("default_fields", dedupeStrings(fields))
-	return dedupeStrings(append(prefixed, defaultLexicalSearchFields...))
+	prefixed := prefixedFields("default_fields", strings.DedupeSorted(fields))
+	return strings.DedupeSorted(append(prefixed, defaultLexicalSearchFields...))
 }
 
 var defaultLexicalSearchFields = []string{
