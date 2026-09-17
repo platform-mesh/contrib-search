@@ -31,7 +31,9 @@ import (
 	"time"
 
 	"go.platform-mesh.io/search-service/internal/service/search"
-	searchstrings "go.platform-mesh.io/search-service/internal/strings"
+	"go.platform-mesh.io/search-service/internal/stringset"
+
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 // maxShardFailureReasons caps the failure messages from partial responses
@@ -87,9 +89,9 @@ func BuildQueryBody(req search.OpenSearchQuery) ([]byte, error) {
 		return nil, err
 	}
 	fields := lexicalSearchFields(req.Fields)
-	semanticFields := prefixedFields("semantic_fields", searchstrings.DedupeSorted(req.SemanticFields))
+	semanticFields := prefixedFields("semantic_fields", stringset.DedupeSorted(req.SemanticFields))
 	filters := normalizeFilters(req.Filters)
-	accountFGAObjects := searchstrings.DedupeSorted(req.AccountFGAObjects)
+	accountFGAObjects := stringset.DedupeSorted(req.AccountFGAObjects)
 
 	var queryClause map[string]any
 	if query == "" {
@@ -228,7 +230,7 @@ func searchMode(raw string) (string, error) {
 }
 
 func (c *Client) Search(ctx context.Context, query search.OpenSearchQuery) (search.OpenSearchPage, error) {
-	indices := searchstrings.DedupeSorted(query.Indices)
+	indices := stringset.DedupeSorted(query.Indices)
 	if len(indices) == 0 {
 		return search.OpenSearchPage{}, fmt.Errorf("at least one OpenSearch index is required")
 	}
@@ -339,14 +341,14 @@ func (c *Client) Search(ctx context.Context, query search.OpenSearchQuery) (sear
 	// Process OpenSearch shard errors: if some shards fail, hits and TotalCount
 	// can be partial. If all shards fail (e.g. mapping errors) we need to dedupe the messages
 	var shardFailures []string
-	seenFailures := make(map[string]struct{}, len(payload.Shards.Failures))
+	seenFailures := sets.New[string]()
 	for _, failure := range payload.Shards.Failures {
 		reason := strings.TrimSpace(fmt.Sprintf("%s: %s: %s", failure.Index, failure.Reason.Type, failure.Reason.Reason))
-		if _, ok := seenFailures[reason]; ok {
+		if seenFailures.Has(reason) {
 			continue
 		}
 
-		seenFailures[reason] = struct{}{}
+		seenFailures.Insert(reason)
 		if len(shardFailures) == maxShardFailureReasons {
 			break
 		}
@@ -377,7 +379,7 @@ func normalizeFilters(filters map[string][]string) map[string][]string {
 			continue
 		}
 
-		values := searchstrings.DedupeSorted(rawValues)
+		values := stringset.DedupeSorted(rawValues)
 		if len(values) == 0 {
 			continue
 		}
@@ -400,12 +402,12 @@ func prefixedFields(prefix string, fields []string) []string {
 			out = append(out, prefixed)
 		}
 	}
-	return searchstrings.DedupeSorted(out)
+	return stringset.DedupeSorted(out)
 }
 
 func lexicalSearchFields(fields []string) []string {
-	prefixed := prefixedFields("default_fields", searchstrings.DedupeSorted(fields))
-	return searchstrings.DedupeSorted(append(prefixed, defaultLexicalSearchFields...))
+	prefixed := prefixedFields("default_fields", stringset.DedupeSorted(fields))
+	return stringset.DedupeSorted(append(prefixed, defaultLexicalSearchFields...))
 }
 
 var defaultLexicalSearchFields = []string{

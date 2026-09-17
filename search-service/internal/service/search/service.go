@@ -26,7 +26,7 @@ import (
 
 	"go.platform-mesh.io/golang-commons/logger"
 	"go.platform-mesh.io/search-service/internal/observability"
-	searchstrings "go.platform-mesh.io/search-service/internal/strings"
+	"go.platform-mesh.io/search-service/internal/stringset"
 )
 
 // logPartialPage records a page that covers fewer shards than were queried.
@@ -217,8 +217,8 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (SearchResponse
 
 		indices = []string{indexRef.IndexName}
 		resourceByIndex = map[string]string{indexRef.IndexName: indexRef.Resource}
-		searchFields = searchstrings.DedupeSorted(indexRef.DefaultFields)
-		semanticFields = searchstrings.DedupeSorted(indexRef.SemanticFields)
+		searchFields = stringset.DedupeSorted(indexRef.DefaultFields)
+		semanticFields = stringset.DedupeSorted(indexRef.SemanticFields)
 		filterQuery = filters
 	} else {
 		indexRefs, err := s.resolver.ListIndices(ctx, org)
@@ -374,9 +374,9 @@ func (s *Service) ListResources(ctx context.Context, req SearchResourcesRequest)
 		}
 		byResource[resource] = SearchResource{
 			Resource:         resource,
-			DefaultFields:    searchstrings.DedupeSorted(ref.DefaultFields),
-			FilterableFields: searchstrings.DedupeSorted(ref.FilterableFields),
-			SemanticFields:   searchstrings.DedupeSorted(ref.SemanticFields),
+			DefaultFields:    stringset.DedupeSorted(ref.DefaultFields),
+			FilterableFields: stringset.DedupeSorted(ref.FilterableFields),
+			SemanticFields:   stringset.DedupeSorted(ref.SemanticFields),
 		}
 	}
 
@@ -434,7 +434,7 @@ func (s *Service) FilterValues(ctx context.Context, req FilterValuesRequest) (Fi
 	}
 
 	query := strings.TrimSpace(req.Query)
-	searchFields := searchstrings.DedupeSorted(indexRef.DefaultFields)
+	searchFields := stringset.DedupeSorted(indexRef.DefaultFields)
 	accountFGAObjects, err := s.authorizer.ListAccessibleAccounts(ctx, org, user)
 	s.metrics.AddOpenFGACalls(1)
 	if err != nil {
@@ -626,7 +626,7 @@ func searchableFieldsForRefs(refs []SearchIndexRef) []string {
 		fields = append(fields, ref.DefaultFields...)
 	}
 
-	return searchstrings.DedupeSorted(fields)
+	return stringset.DedupeSorted(fields)
 }
 
 func normalizeFilters(filters map[string][]string) map[string][]string {

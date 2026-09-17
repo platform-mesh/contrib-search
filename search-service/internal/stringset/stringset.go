@@ -14,35 +14,24 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package strings holds string helpers shared by the client and service layers.
-package strings
+// Package stringset holds string helpers shared by the client and service layers.
+package stringset
 
 import (
-	"slices"
 	"strings"
+
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 // DedupeSorted trims every value, drops the empty ones, removes duplicates and
 // sorts what remains. The result is never nil.
 func DedupeSorted(values []string) []string {
-	out := make([]string, 0, len(values))
-	if len(values) == 0 {
-		return out
-	}
-
-	seen := make(map[string]struct{}, len(values))
+	trimmed := make([]string, 0, len(values))
 	for _, value := range values {
-		trimmed := strings.TrimSpace(value)
-		if trimmed == "" {
-			continue
+		if value = strings.TrimSpace(value); value != "" {
+			trimmed = append(trimmed, value)
 		}
-		if _, ok := seen[trimmed]; ok {
-			continue
-		}
-		seen[trimmed] = struct{}{}
-		out = append(out, trimmed)
 	}
-	slices.Sort(out)
 
-	return out
+	return sets.List(sets.New(trimmed...))
 }
