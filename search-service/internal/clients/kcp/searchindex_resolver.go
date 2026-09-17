@@ -28,7 +28,7 @@ import (
 	"go.platform-mesh.io/golang-commons/logger"
 	"go.platform-mesh.io/search-service/internal/config"
 	"go.platform-mesh.io/search-service/internal/service/search"
-	"go.platform-mesh.io/search-service/internal/strings"
+	searchstrings "go.platform-mesh.io/search-service/internal/strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -261,9 +261,9 @@ func mapSearchIndexRef(item pmsearchv1alpha1.SearchIndex, orgClusterID string, c
 		IndexName:             indexName,
 		IndexPrefix:           strings.TrimSpace(item.Spec.IndexPrefix),
 		OrganizationClusterID: orgID,
-		DefaultFields:         strings.DedupeSorted(item.Spec.DefaultFields),
-		FilterableFields:      strings.DedupeSorted(item.Spec.FilterableFields),
-		SemanticFields:        strings.DedupeSorted(item.Spec.SemanticFields),
+		DefaultFields:         searchstrings.DedupeSorted(item.Spec.DefaultFields),
+		FilterableFields:      searchstrings.DedupeSorted(item.Spec.FilterableFields),
+		SemanticFields:        searchstrings.DedupeSorted(item.Spec.SemanticFields),
 		Group:                 cfg.Group,
 		Version:               cfg.Version,
 	}, true

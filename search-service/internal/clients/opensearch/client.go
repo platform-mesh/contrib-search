@@ -31,7 +31,7 @@ import (
 	"time"
 
 	"go.platform-mesh.io/search-service/internal/service/search"
-	"go.platform-mesh.io/search-service/internal/strings"
+	searchstrings "go.platform-mesh.io/search-service/internal/strings"
 )
 
 // maxShardFailureReasons caps the failure messages from partial responses
@@ -87,9 +87,9 @@ func BuildQueryBody(req search.OpenSearchQuery) ([]byte, error) {
 		return nil, err
 	}
 	fields := lexicalSearchFields(req.Fields)
-	semanticFields := prefixedFields("semantic_fields", strings.DedupeSorted(req.SemanticFields))
+	semanticFields := prefixedFields("semantic_fields", searchstrings.DedupeSorted(req.SemanticFields))
 	filters := normalizeFilters(req.Filters)
-	accountFGAObjects := strings.DedupeSorted(req.AccountFGAObjects)
+	accountFGAObjects := searchstrings.DedupeSorted(req.AccountFGAObjects)
 
 	var queryClause map[string]any
 	if query == "" {
@@ -228,7 +228,7 @@ func searchMode(raw string) (string, error) {
 }
 
 func (c *Client) Search(ctx context.Context, query search.OpenSearchQuery) (search.OpenSearchPage, error) {
-	indices := strings.DedupeSorted(query.Indices)
+	indices := searchstrings.DedupeSorted(query.Indices)
 	if len(indices) == 0 {
 		return search.OpenSearchPage{}, fmt.Errorf("at least one OpenSearch index is required")
 	}
@@ -377,7 +377,7 @@ func normalizeFilters(filters map[string][]string) map[string][]string {
 			continue
 		}
 
-		values := strings.DedupeSorted(rawValues)
+		values := searchstrings.DedupeSorted(rawValues)
 		if len(values) == 0 {
 			continue
 		}
@@ -400,12 +400,12 @@ func prefixedFields(prefix string, fields []string) []string {
 			out = append(out, prefixed)
 		}
 	}
-	return strings.DedupeSorted(out)
+	return searchstrings.DedupeSorted(out)
 }
 
 func lexicalSearchFields(fields []string) []string {
-	prefixed := prefixedFields("default_fields", strings.DedupeSorted(fields))
-	return strings.DedupeSorted(append(prefixed, defaultLexicalSearchFields...))
+	prefixed := prefixedFields("default_fields", searchstrings.DedupeSorted(fields))
+	return searchstrings.DedupeSorted(append(prefixed, defaultLexicalSearchFields...))
 }
 
 var defaultLexicalSearchFields = []string{
