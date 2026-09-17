@@ -30,6 +30,7 @@ import (
 
 	"go.platform-mesh.io/golang-commons/logger"
 	appcontext "go.platform-mesh.io/search-service/internal/context"
+	"go.platform-mesh.io/search-service/internal/httperr"
 	"go.platform-mesh.io/search-service/internal/service/search"
 )
 
@@ -44,6 +45,13 @@ type SearchService interface {
 func CreateRouter(svc SearchService, mws []func(http.Handler) http.Handler) *chi.Mux {
 	router := chi.NewRouter()
 
+	router.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		httperr.Write(w, r, httperr.NotFound)
+	})
+	router.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
+		httperr.Write(w, r, httperr.MethodNotAllowed)
+	})
+
 	router.Get("/readyz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -54,19 +62,19 @@ func CreateRouter(svc SearchService, mws []func(http.Handler) http.Handler) *chi
 	router.With(mws...).Get("/rest/v1/search", func(w http.ResponseWriter, r *http.Request) {
 		rc, err := appcontext.GetRequestContext(r.Context())
 		if err != nil {
-			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+			httperr.Write(w, r, httperr.AuthenticationRequired)
 			return
 		}
 
 		q := strings.TrimSpace(r.URL.Query().Get("q"))
 		limit, err := parseOptionalLimit(r.URL.Query().Get("limit"))
 		if err != nil {
-			http.Error(w, "invalid limit", http.StatusBadRequest)
+			httperr.Write(w, r, httperr.InvalidRequest.WithDetail("limit must be an integer"))
 			return
 		}
 		page, err := parseOptionalPage(r.URL.Query().Get("page"))
 		if err != nil {
-			http.Error(w, "invalid page", http.StatusBadRequest)
+			httperr.Write(w, r, httperr.InvalidRequest.WithDetail(err.Error()))
 			return
 		}
 
@@ -74,7 +82,7 @@ func CreateRouter(svc SearchService, mws []func(http.Handler) http.Handler) *chi
 
 		filters, fgaRole, err := parseSearchFilters(r.URL.Query())
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			httperr.Write(w, r, httperr.InvalidRequest.WithDetail(err.Error()))
 			return
 		}
 
@@ -84,7 +92,7 @@ func CreateRouter(svc SearchService, mws []func(http.Handler) http.Handler) *chi
 			len(filters) != 0 || fgaRole != "",
 		)
 		if resources == nil {
-			http.Error(w, "Filtering is not supported for searching across all resources.", http.StatusBadRequest)
+			httperr.Write(w, r, httperr.InvalidRequest.WithDetail("filtering is not supported when searching across all resources"))
 			return
 		}
 
@@ -126,7 +134,7 @@ func CreateRouter(svc SearchService, mws []func(http.Handler) http.Handler) *chi
 	router.With(mws...).Get("/rest/v1/search/resources", func(w http.ResponseWriter, r *http.Request) {
 		rc, err := appcontext.GetRequestContext(r.Context())
 		if err != nil {
-			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+			httperr.Write(w, r, httperr.AuthenticationRequired)
 			return
 		}
 
@@ -146,19 +154,19 @@ func CreateRouter(svc SearchService, mws []func(http.Handler) http.Handler) *chi
 	router.With(mws...).Get("/rest/v1/search/filter-values", func(w http.ResponseWriter, r *http.Request) {
 		rc, err := appcontext.GetRequestContext(r.Context())
 		if err != nil {
-			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+			httperr.Write(w, r, httperr.AuthenticationRequired)
 			return
 		}
 
 		limit, err := parseOptionalLimit(r.URL.Query().Get("limit"))
 		if err != nil {
-			http.Error(w, "invalid limit", http.StatusBadRequest)
+			httperr.Write(w, r, httperr.InvalidRequest.WithDetail("limit must be an integer"))
 			return
 		}
 
 		filters, err := parseFilters(r.URL.Query())
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			httperr.Write(w, r, httperr.InvalidRequest.WithDetail(err.Error()))
 			return
 		}
 
@@ -293,25 +301,54 @@ func parseSearchFilters(values map[string][]string) (map[string][]string, string
 }
 
 func handleError(w http.ResponseWriter, r *http.Request, rc appcontext.RequestContext, err error) {
+	problem := problemFor(err)
+
 	log := logger.LoadLoggerFromContext(r.Context())
-	status := http.StatusInternalServerError
-	switch {
-	case errors.Is(err, search.ErrInvalidRequest), errors.Is(err, search.ErrInvalidCursor):
-		status = http.StatusBadRequest
-		http.Error(w, err.Error(), status)
-	case errors.Is(err, search.ErrUnauthorized):
-		status = http.StatusUnauthorized
-		http.Error(w, http.StatusText(status), status)
-	case errors.Is(err, search.ErrForbidden):
-		status = http.StatusForbidden
-		http.Error(w, http.StatusText(status), status)
-	default:
-		http.Error(w, http.StatusText(status), status)
-	}
 	log.Error().
 		Err(err).
 		Str("path", r.URL.Path).
 		Str("organization", rc.Organization).
-		Int("statusCode", status).
+		Str("category", string(problem.Category)).
+		Int("statusCode", problem.Status).
 		Msg("search request failed")
+
+	httperr.Write(w, r, problem)
+}
+
+// problemFor maps a service error onto the problem the caller sees. Only the
+// invalid-request family forwards its own text: those messages are authored for
+// the caller, while backend errors wrap the raw upstream cause and stay behind
+// the generic detail on the problem template.
+func problemFor(err error) httperr.Problem {
+	switch {
+	case errors.Is(err, search.ErrInvalidCursor):
+		return httperr.InvalidCursor.WithDetail(reason(err))
+	case errors.Is(err, search.ErrInvalidRequest):
+		return httperr.InvalidRequest.WithDetail(reason(err))
+	case errors.Is(err, search.ErrUnauthorized):
+		return httperr.AuthenticationRequired
+	case errors.Is(err, search.ErrForbidden):
+		return httperr.AccessDenied
+	case errors.Is(err, search.ErrUpstreamTimeout):
+		return httperr.UpstreamTimeout
+	case errors.Is(err, search.ErrIndexUnavailable):
+		return httperr.IndexUnavailable
+	case errors.Is(err, search.ErrAuthzBackend):
+		return httperr.AuthorizationUnavailable
+	case errors.Is(err, search.ErrSearchBackend):
+		return httperr.SearchBackendUnavailable
+	default:
+		return httperr.Internal
+	}
+}
+
+// reason drops the sentinel prefix, so "invalid request: filters require a
+// resource" becomes the detail "filters require a resource" and does not repeat
+// the problem title.
+func reason(err error) string {
+	if _, after, found := strings.Cut(err.Error(), ": "); found {
+		return after
+	}
+
+	return err.Error()
 }

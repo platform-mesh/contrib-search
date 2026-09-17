@@ -174,7 +174,7 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (SearchResponse
 			Str("organization", org).
 			Str("queryHash", qHash).
 			Msg("failed to list accessible accounts with OpenFGA")
-		return SearchResponse{}, fmt.Errorf("%w: list accessible accounts: %v", ErrBackend, err)
+		return SearchResponse{}, backendErr(ErrAuthzBackend, "list accessible accounts", err)
 	}
 	if len(accountFGAObjects) == 0 {
 		if pageMode {
@@ -196,7 +196,7 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (SearchResponse
 		indexRef, err := s.resolver.ResolveIndex(ctx, org, resource)
 		if err != nil {
 			log.Error().Err(err).Str("searchmode", mode).Str("org", org).Str("resource", resource).Msg("failed to resolve search index")
-			return SearchResponse{}, fmt.Errorf("%w: resolve search index: %v", ErrBackend, err)
+			return SearchResponse{}, backendErr(ErrSearchBackend, "resolve search index", err)
 		}
 
 		if err := validateFiltersAllowed(filters, indexRef.FilterableFields); err != nil {
@@ -215,12 +215,12 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (SearchResponse
 		indexRefs, err := s.resolver.ListIndices(ctx, org)
 		if err != nil {
 			log.Error().Err(err).Str("searchmode", mode).Str("org", org).Msg("failed to list search indices")
-			return SearchResponse{}, fmt.Errorf("%w: list search indices: %v", ErrBackend, err)
+			return SearchResponse{}, backendErr(ErrSearchBackend, "list search indices", err)
 		}
 
 		indices, resourceByIndex = indexLookup(indexRefs)
 		if len(indices) == 0 {
-			return SearchResponse{}, fmt.Errorf("%w: no active search indices for org %q", ErrBackend, org)
+			return SearchResponse{}, fmt.Errorf("%w: org %q", ErrIndexUnavailable, org)
 		}
 		searchFields = searchableFieldsForRefs(indexRefs)
 	}
@@ -257,7 +257,7 @@ outer:
 		s.metrics.AddOpenSearchCalls(1)
 		if err != nil {
 			log.Error().Err(err).Msg("failed to query OpenSearch")
-			return SearchResponse{}, fmt.Errorf("%w: query OpenSearch: %v", ErrBackend, err)
+			return SearchResponse{}, backendErr(ErrSearchBackend, "query OpenSearch", err)
 		}
 		if len(page.Hits) == 0 {
 			exhausted = true
@@ -280,7 +280,7 @@ outer:
 				Str("resource", resource).
 				Int("scannedHits", totalScanned).
 				Msg("failed to authorize search hits with OpenFGA")
-			return SearchResponse{}, fmt.Errorf("%w: filter authorization: %v", ErrBackend, err)
+			return SearchResponse{}, backendErr(ErrAuthzBackend, "filter authorization", err)
 		}
 		s.metrics.AddOpenFGACalls(authz.Calls)
 		s.metrics.AddDroppedMissingContext(authz.DroppedMissingContext)
@@ -352,7 +352,7 @@ func (s *Service) ListResources(ctx context.Context, req SearchResourcesRequest)
 
 	refs, err := s.resolver.ListIndices(ctx, org)
 	if err != nil {
-		return SearchResourcesResponse{}, fmt.Errorf("%w: list search indices: %v", ErrBackend, err)
+		return SearchResourcesResponse{}, backendErr(ErrSearchBackend, "list search indices", err)
 	}
 
 	resources := make([]SearchResource, 0, len(refs))
@@ -410,7 +410,7 @@ func (s *Service) FilterValues(ctx context.Context, req FilterValuesRequest) (Fi
 
 	indexRef, err := s.resolver.ResolveIndex(ctx, org, resource)
 	if err != nil {
-		return FilterValuesResponse{}, fmt.Errorf("%w: resolve search index: %v", ErrBackend, err)
+		return FilterValuesResponse{}, backendErr(ErrSearchBackend, "resolve search index", err)
 	}
 
 	allowed := fieldSet(indexRef.FilterableFields)
@@ -428,7 +428,7 @@ func (s *Service) FilterValues(ctx context.Context, req FilterValuesRequest) (Fi
 	accountFGAObjects, err := s.authorizer.ListAccessibleAccounts(ctx, org, user, "")
 	s.metrics.AddOpenFGACalls(1)
 	if err != nil {
-		return FilterValuesResponse{}, fmt.Errorf("%w: list accessible accounts: %v", ErrBackend, err)
+		return FilterValuesResponse{}, backendErr(ErrAuthzBackend, "list accessible accounts", err)
 	}
 	if len(accountFGAObjects) == 0 {
 		return FilterValuesResponse{Values: []string{}}, nil
@@ -452,7 +452,7 @@ outer:
 		})
 		s.metrics.AddOpenSearchCalls(1)
 		if err != nil {
-			return FilterValuesResponse{}, fmt.Errorf("%w: query OpenSearch: %v", ErrBackend, err)
+			return FilterValuesResponse{}, backendErr(ErrSearchBackend, "query OpenSearch", err)
 		}
 		if len(page.Hits) == 0 {
 			break
@@ -465,7 +465,7 @@ outer:
 			Hits:         page.Hits,
 		})
 		if err != nil {
-			return FilterValuesResponse{}, fmt.Errorf("%w: filter authorization: %v", ErrBackend, err)
+			return FilterValuesResponse{}, backendErr(ErrAuthzBackend, "filter authorization", err)
 		}
 		s.metrics.AddOpenFGACalls(authz.Calls)
 		s.metrics.AddDroppedMissingContext(authz.DroppedMissingContext)

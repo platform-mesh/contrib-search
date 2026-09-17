@@ -56,7 +56,7 @@ type apiBindingWatcherSubroutine struct {
 // orgsClient must be scoped to the root:orgs workspace.
 // searchConfigClient must be scoped to the provider workspace.
 // localCfg must be the admin kcp REST config.
-func NewAPIBindingWatcherSubroutine(mgr mcmanager.Manager, orgsClient ctrlruntimeclient.Client, localCfg *rest.Config, indexPrefix string, cfg config.Config) (lifecyclesubroutine.Subroutine, error) {
+func NewAPIBindingWatcherSubroutine(mgr mcmanager.Manager, orgsClient ctrlruntimeclient.Client, localCfg *rest.Config, indexPrefix string, cfg config.OperatorConfig) (lifecyclesubroutine.Subroutine, error) {
 	rootCfg, err := stripPathFromConfig(localCfg)
 	if err != nil {
 		return nil, err

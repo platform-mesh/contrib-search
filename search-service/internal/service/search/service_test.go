@@ -288,8 +288,8 @@ func TestSearchTreatsMissingDefaultFGARelationAsBackendFailure(t *testing.T) {
 		User:         "alice@example.com",
 		Query:        "foo",
 	})
-	if !errors.Is(err, ErrBackend) {
-		t.Fatalf("expected ErrBackend, got %v", err)
+	if !errors.Is(err, ErrAuthzBackend) {
+		t.Fatalf("expected ErrAuthzBackend, got %v", err)
 	}
 }
 
