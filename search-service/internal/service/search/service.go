@@ -27,7 +27,25 @@ import (
 
 	"go.platform-mesh.io/golang-commons/logger"
 	"go.platform-mesh.io/search-service/internal/observability"
+	"go.platform-mesh.io/search-service/internal/stringset"
 )
+
+// logPartialPage records a page that covers fewer shards than were queried.
+// OpenSearch reports this with a 200, so without the warning a mapping conflict
+// in one index looks exactly like a complete result with a smaller total.
+func logPartialPage(log *logger.Logger, page OpenSearchPage, op string) {
+	if !page.Partial() {
+		return
+	}
+
+	log.Warn().
+		Str("operation", op).
+		Bool("timedOut", page.TimedOut).
+		Int("shardsTotal", page.ShardsTotal).
+		Int("shardsFailed", page.ShardsFailed).
+		Strs("shardFailures", page.ShardFailures).
+		Msg("OpenSearch returned a partial result; hits and totalCount are incomplete")
+}
 
 type ServiceConfig struct {
 	DefaultLimit   int
@@ -208,8 +226,8 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (SearchResponse
 
 		indices = []string{indexRef.IndexName}
 		resourceByIndex = map[string]string{indexRef.IndexName: indexRef.Resource}
-		searchFields = searchableFields(indexRef.DefaultFields)
-		semanticFields = semanticSearchFields(indexRef.SemanticFields)
+		searchFields = stringset.DedupeSorted(indexRef.DefaultFields)
+		semanticFields = stringset.DedupeSorted(indexRef.SemanticFields)
 		filterQuery = filters
 	} else {
 		indexRefs, err := s.resolver.ListIndices(ctx, org)
@@ -259,6 +277,7 @@ outer:
 			log.Error().Err(err).Msg("failed to query OpenSearch")
 			return SearchResponse{}, backendErr(ErrSearchBackend, "query OpenSearch", err)
 		}
+		logPartialPage(log, page, "search")
 		if len(page.Hits) == 0 {
 			exhausted = true
 			break
@@ -364,9 +383,9 @@ func (s *Service) ListResources(ctx context.Context, req SearchResourcesRequest)
 		}
 		byResource[resource] = SearchResource{
 			Resource:         resource,
-			DefaultFields:    dedupeNonEmpty(ref.DefaultFields),
-			FilterableFields: dedupeNonEmpty(ref.FilterableFields),
-			SemanticFields:   dedupeNonEmpty(ref.SemanticFields),
+			DefaultFields:    stringset.DedupeSorted(ref.DefaultFields),
+			FilterableFields: stringset.DedupeSorted(ref.FilterableFields),
+			SemanticFields:   stringset.DedupeSorted(ref.SemanticFields),
 		}
 	}
 
@@ -424,7 +443,7 @@ func (s *Service) FilterValues(ctx context.Context, req FilterValuesRequest) (Fi
 	}
 
 	query := strings.TrimSpace(req.Query)
-	searchFields := searchableFields(indexRef.DefaultFields)
+	searchFields := stringset.DedupeSorted(indexRef.DefaultFields)
 	accountFGAObjects, err := s.authorizer.ListAccessibleAccounts(ctx, org, user, "")
 	s.metrics.AddOpenFGACalls(1)
 	if err != nil {
@@ -454,6 +473,7 @@ outer:
 		if err != nil {
 			return FilterValuesResponse{}, backendErr(ErrSearchBackend, "query OpenSearch", err)
 		}
+		logPartialPage(logger.LoadLoggerFromContext(ctx), page, "filter values")
 		if len(page.Hits) == 0 {
 			break
 		}
@@ -609,21 +629,13 @@ func resolveHitResource(hit OpenSearchHit, requestedResource string, byIndex map
 	return strings.TrimSpace(stringFromMap(hit.Source, "resource"))
 }
 
-func searchableFields(defaultFields []string) []string {
-	return dedupeNonEmpty(defaultFields)
-}
-
 func searchableFieldsForRefs(refs []SearchIndexRef) []string {
 	fields := make([]string, 0, len(refs)*2)
 	for _, ref := range refs {
 		fields = append(fields, ref.DefaultFields...)
 	}
 
-	return dedupeNonEmpty(fields)
-}
-
-func semanticSearchFields(fields []string) []string {
-	return dedupeNonEmpty(fields)
+	return stringset.DedupeSorted(fields)
 }
 
 func normalizeFilters(filters map[string][]string) map[string][]string {
@@ -686,25 +698,6 @@ func fieldSet(values []string) map[string]struct{} {
 			out[trimmed] = struct{}{}
 		}
 	}
-
-	return out
-}
-
-func dedupeNonEmpty(values []string) []string {
-	out := make([]string, 0, len(values))
-	seen := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		trimmed := strings.TrimSpace(value)
-		if trimmed == "" {
-			continue
-		}
-		if _, ok := seen[trimmed]; ok {
-			continue
-		}
-		seen[trimmed] = struct{}{}
-		out = append(out, trimmed)
-	}
-	slices.Sort(out)
 
 	return out
 }

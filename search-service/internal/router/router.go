@@ -335,6 +335,8 @@ func problemFor(err error) httperr.Problem {
 		return httperr.IndexUnavailable
 	case errors.Is(err, search.ErrAuthzBackend):
 		return httperr.AuthorizationUnavailable
+	case errors.Is(err, search.ErrSearchBackendRejected):
+		return httperr.SearchQueryRejected
 	case errors.Is(err, search.ErrSearchBackend):
 		return httperr.SearchBackendUnavailable
 	default:

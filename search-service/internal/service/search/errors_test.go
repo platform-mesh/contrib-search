@@ -83,6 +83,14 @@ func TestBackendErrClassifiesTimeouts(t *testing.T) {
 			cause:    errors.New("no store found"),
 			want:     ErrAuthzBackend,
 		},
+		{
+			// backendErr formats the cause with %v, so the promotion has to happen
+			// here or the rejection is lost before the router sees it.
+			name:     "rejected query is promoted",
+			sentinel: ErrSearchBackend,
+			cause:    fmt.Errorf("%w: status 400: number_format_exception", ErrSearchBackendRejected),
+			want:     ErrSearchBackendRejected,
+		},
 	}
 
 	for _, tc := range tests {
@@ -92,8 +100,8 @@ func TestBackendErrClassifiesTimeouts(t *testing.T) {
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("expected %v, got %v", tc.want, err)
 			}
-			if tc.want == ErrUpstreamTimeout && errors.Is(err, tc.sentinel) && tc.sentinel != ErrUpstreamTimeout {
-				t.Fatalf("timeout should not also match %v: %v", tc.sentinel, err)
+			if tc.want != tc.sentinel && errors.Is(err, tc.sentinel) {
+				t.Fatalf("promoted error should not also match %v: %v", tc.sentinel, err)
 			}
 			if !strings.Contains(err.Error(), "query backend") {
 				t.Fatalf("expected the operation to be wrapped, got %v", err)
@@ -106,14 +114,15 @@ func TestBackendErrClassifiesTimeouts(t *testing.T) {
 // first-match switch, so an error matching two sentinels would map by accident.
 func TestSentinelsAreDistinct(t *testing.T) {
 	sentinels := map[string]error{
-		"ErrInvalidRequest":   ErrInvalidRequest,
-		"ErrInvalidCursor":    ErrInvalidCursor,
-		"ErrUnauthorized":     ErrUnauthorized,
-		"ErrForbidden":        ErrForbidden,
-		"ErrSearchBackend":    ErrSearchBackend,
-		"ErrAuthzBackend":     ErrAuthzBackend,
-		"ErrIndexUnavailable": ErrIndexUnavailable,
-		"ErrUpstreamTimeout":  ErrUpstreamTimeout,
+		"ErrInvalidRequest":        ErrInvalidRequest,
+		"ErrInvalidCursor":         ErrInvalidCursor,
+		"ErrUnauthorized":          ErrUnauthorized,
+		"ErrForbidden":             ErrForbidden,
+		"ErrSearchBackend":         ErrSearchBackend,
+		"ErrSearchBackendRejected": ErrSearchBackendRejected,
+		"ErrAuthzBackend":          ErrAuthzBackend,
+		"ErrIndexUnavailable":      ErrIndexUnavailable,
+		"ErrUpstreamTimeout":       ErrUpstreamTimeout,
 	}
 
 	for name, err := range sentinels {

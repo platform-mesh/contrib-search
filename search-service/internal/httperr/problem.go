@@ -113,6 +113,14 @@ var (
 		Category: CategorySearchBackend,
 	}
 
+	SearchQueryRejected = Problem{
+		Type:     typeBaseURI + "search-query-rejected",
+		Title:    "Search query rejected",
+		Status:   http.StatusInternalServerError,
+		Detail:   "the search backend rejected the generated query",
+		Category: CategorySearchBackend,
+	}
+
 	IndexUnavailable = Problem{
 		Type:     typeBaseURI + "index-unavailable",
 		Title:    "Search index unavailable",

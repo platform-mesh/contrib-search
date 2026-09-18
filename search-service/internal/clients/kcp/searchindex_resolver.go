@@ -28,6 +28,7 @@ import (
 	"go.platform-mesh.io/golang-commons/logger"
 	"go.platform-mesh.io/search-service/internal/config"
 	"go.platform-mesh.io/search-service/internal/service/search"
+	"go.platform-mesh.io/search-service/internal/stringset"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -260,9 +261,9 @@ func mapSearchIndexRef(item pmsearchv1alpha1.SearchIndex, orgClusterID string, c
 		IndexName:             indexName,
 		IndexPrefix:           strings.TrimSpace(item.Spec.IndexPrefix),
 		OrganizationClusterID: orgID,
-		DefaultFields:         normalizeStringSlice(item.Spec.DefaultFields),
-		FilterableFields:      normalizeStringSlice(item.Spec.FilterableFields),
-		SemanticFields:        normalizeStringSlice(item.Spec.SemanticFields),
+		DefaultFields:         stringset.DedupeSorted(item.Spec.DefaultFields),
+		FilterableFields:      stringset.DedupeSorted(item.Spec.FilterableFields),
+		SemanticFields:        stringset.DedupeSorted(item.Spec.SemanticFields),
 		Group:                 cfg.Group,
 		Version:               cfg.Version,
 	}, true
@@ -318,30 +319,6 @@ func normalizeName(value string) string {
 		}
 	}
 	return strings.Trim(b.String(), "-")
-}
-
-func normalizeStringSlice(values []string) []string {
-	if len(values) == 0 {
-		return nil
-	}
-
-	seen := make(map[string]struct{}, len(values))
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		trimmed := strings.TrimSpace(value)
-		if trimmed == "" {
-			continue
-		}
-		if _, ok := seen[trimmed]; ok {
-			continue
-		}
-		seen[trimmed] = struct{}{}
-		out = append(out, trimmed)
-	}
-
-	slices.Sort(out)
-
-	return out
 }
 
 func configForKCPCluster(clusterName string, cfg *rest.Config) (*rest.Config, error) {
