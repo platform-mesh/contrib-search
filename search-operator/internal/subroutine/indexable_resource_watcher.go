@@ -187,7 +187,7 @@ func (s *IndexableResourceWatcherSubroutine) Process(ctx context.Context, instan
 		log.Warn().Msg("AccountInfo is missing required account/organization origin metadata, requeuing")
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
-	doc.FilterableFields["account_fga_object"] = buildFGAObjectName(pmcorev1alpha1.GroupName, pmsearchv1alpha1.AccountKind, accountInfo.Spec.Account.OriginClusterId, accountInfo.Spec.Account.Name, "")
+	doc.FilterableFields["account_fga_object"] = resolveAccountFGAObject(gvk, resourceClusterID, resource.GetName(), accountInfo)
 
 	fgaGroup, fgaKind, fgaClusterID := mapResourceToFGAObject(gvk.Group, gvk.Kind, resourceClusterID, accountInfo)
 	doc.FGAObject = buildFGAObjectName(fgaGroup, fgaKind, fgaClusterID.String(), resource.GetName(), resource.GetNamespace())
@@ -520,6 +520,18 @@ func buildPayload(resource *unstructured.Unstructured) (string, string, error) {
 	}
 
 	return string(jsonBytes), string(yamlBytes), nil
+}
+
+// resolveAccountFGAObject returns the FGA object of the Account a document is
+// filtered by. An Account resource lives in its parent's workspace, so the
+// AccountInfo resolved for it describes the parent; it is filtered by the
+// Account it represents instead.
+func resolveAccountFGAObject(gvk schema.GroupVersionKind, resourceClusterID multicluster.ClusterName, resourceName string, accountInfo *pmcorev1alpha1.AccountInfo) string {
+	if gvk.Group == pmcorev1alpha1.GroupName && gvk.Kind == pmsearchv1alpha1.AccountKind {
+		return buildFGAObjectName(pmcorev1alpha1.GroupName, pmsearchv1alpha1.AccountKind, resourceClusterID.String(), resourceName, "")
+	}
+
+	return buildFGAObjectName(pmcorev1alpha1.GroupName, pmsearchv1alpha1.AccountKind, accountInfo.Spec.Account.OriginClusterId, accountInfo.Spec.Account.Name, "")
 }
 
 func mapResourceToFGAObject(group, kind string, clusterID multicluster.ClusterName, accountInfo *pmcorev1alpha1.AccountInfo) (fgaGroup, fgaKind string, fgaClusterID multicluster.ClusterName) {

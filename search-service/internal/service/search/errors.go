@@ -36,6 +36,16 @@ var (
 	ErrIndexUnavailable      = errors.New("no search index available")
 	ErrUpstreamTimeout       = errors.New("upstream timeout")
 	ErrSearchBackendRejected = errors.New("search backend rejected the request")
+  ErrInvalidRequest        = errors.New("invalid request")
+	ErrInvalidCursor         = errors.New("invalid cursor")
+	ErrUnauthorized          = errors.New("unauthorized")
+	ErrForbidden             = errors.New("forbidden")
+	ErrSearchBackend         = errors.New("search backend failure")
+	ErrAuthzBackend          = errors.New("authorization backend failure")
+	ErrIndexUnavailable      = errors.New("no search index available")
+	ErrUpstreamTimeout       = errors.New("upstream timeout")
+  ErrSearchBackendRejected = errors.New("search backend rejected the request")
+	ErrFGARelationNotFound   = errors.New("OpenFGA relation not found")
 )
 
 // backendErr wraps an upstream failure, except for timeouts and rejected queries:
