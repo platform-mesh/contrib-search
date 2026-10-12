@@ -19,6 +19,7 @@ package kcp
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"go.platform-mesh.io/golang-commons/logger"
@@ -35,11 +36,28 @@ type OrgAccessValidator struct {
 }
 
 func NewOrgAccessValidator(restCfg *rest.Config, log *logger.Logger) (*OrgAccessValidator, error) {
-	cs, err := kubernetes.NewForConfig(restCfg)
+	// Make this call directly to :root where keycloak is configured
+	cfg := rest.CopyConfig(restCfg)
+	cfg.Host = stripClusterPath(cfg.Host)
+
+	cs, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("create kcp kubernetes client: %w", err)
 	}
 	return &OrgAccessValidator{clientset: cs, log: log}, nil
+}
+
+// stripClusterPath removes the /clusters/<path> suffix from a KCP host URL.
+func stripClusterPath(host string) string {
+	u, err := url.Parse(host)
+	if err != nil {
+		return host
+	}
+	if idx := strings.Index(u.Path, "/clusters/"); idx >= 0 {
+		u.Path = u.Path[:idx]
+		return u.String()
+	}
+	return host
 }
 
 // ValidateTokenForOrg returns true when kcp authenticated the JWT.
