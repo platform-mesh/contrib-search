@@ -19,6 +19,7 @@ package kcp
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"go.platform-mesh.io/golang-commons/logger"
@@ -34,12 +35,30 @@ type OrgAccessValidator struct {
 	log       *logger.Logger
 }
 
-func NewOrgAccessValidator(restCfg *rest.Config, log *logger.Logger) (*OrgAccessValidator, error) {
-	cs, err := kubernetes.NewForConfig(restCfg)
+func NewOrgAccessValidator(restCfg *rest.Config, orgWorkspacePath string, log *logger.Logger) (*OrgAccessValidator, error) {
+	cfg := rest.CopyConfig(restCfg)
+	cfg.Host = replaceClusterPath(cfg.Host, orgWorkspacePath)
+
+	cs, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("create kcp kubernetes client: %w", err)
 	}
 	return &OrgAccessValidator{clientset: cs, log: log}, nil
+}
+
+// replaceClusterPath replaces the /clusters/<path> portion of a KCP host URL
+// with the given workspace path. This lets TokenReview be called against a
+// workspace that has OIDC configured for Keycloak tokens.
+func replaceClusterPath(host, workspacePath string) string {
+	u, err := url.Parse(host)
+	if err != nil {
+		return host
+	}
+	if idx := strings.Index(u.Path, "/clusters/"); idx >= 0 {
+		u.Path = u.Path[:idx] + "/clusters/" + workspacePath
+		return u.String()
+	}
+	return host
 }
 
 // ValidateTokenForOrg returns true when kcp authenticated the JWT.
