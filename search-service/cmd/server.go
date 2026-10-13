@@ -57,7 +57,7 @@ var serverCmd = &cobra.Command{
 			log.Fatal().Err(err).Msg("failed to load kube config")
 		}
 
-		orgValidator, err := kcp.NewOrgAccessValidator(restCfg, log)
+		orgValidator, err := kcp.NewOrgAccessValidator(restCfg, serviceCfg.SearchIndex.OrgWorkspacePath, log)
 		if err != nil {
 			log.Fatal().Err(err).Msg("failed to create org access validator")
 		}

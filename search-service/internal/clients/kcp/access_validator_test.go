@@ -31,32 +31,36 @@ import (
 
 func TestNewOrgAccessValidatorStripsClusterPath(t *testing.T) {
 	tests := []struct {
-		name     string
-		host     string
-		wantHost string
+		name          string
+		host          string
+		workspacePath string
+		wantHost      string
 	}{
 		{
-			name:     "strips /clusters/ suffix",
-			host:     "https://frontproxy:443/clusters/root:providers:search",
-			wantHost: "https://frontproxy:443",
+			name:          "replaces workspace path",
+			host:          "https://frontproxy:443/clusters/root:providers:search",
+			workspacePath: "root:orgs",
+			wantHost:      "https://frontproxy:443/clusters/root:orgs",
 		},
 		{
-			name:     "strips nested cluster path",
-			host:     "https://frontproxy:443/clusters/root:orgs:sap",
-			wantHost: "https://frontproxy:443",
+			name:          "replaces nested cluster path",
+			host:          "https://frontproxy:443/clusters/root:orgs:sap",
+			workspacePath: "root:orgs",
+			wantHost:      "https://frontproxy:443/clusters/root:orgs",
 		},
 		{
-			name:     "no cluster path left unchanged",
-			host:     "https://kube-apiserver:6443",
-			wantHost: "https://kube-apiserver:6443",
+			name:          "no cluster path left unchanged",
+			host:          "https://kube-apiserver:6443",
+			workspacePath: "root:orgs",
+			wantHost:      "https://kube-apiserver:6443",
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := stripClusterPath(tc.host)
+			got := replaceClusterPath(tc.host, tc.workspacePath)
 			if got != tc.wantHost {
-				t.Fatalf("host after strip: got %q, want %q", got, tc.wantHost)
+				t.Fatalf("host after replace: got %q, want %q", got, tc.wantHost)
 			}
 		})
 	}
