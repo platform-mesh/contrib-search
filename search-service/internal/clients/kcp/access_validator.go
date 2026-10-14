@@ -35,9 +35,9 @@ type OrgAccessValidator struct {
 	log       *logger.Logger
 }
 
-func NewOrgAccessValidator(restCfg *rest.Config, orgWorkspacePath string, log *logger.Logger) (*OrgAccessValidator, error) {
+func NewOrgAccessValidator(restCfg *rest.Config, tokenReviewWorkspacePath string, log *logger.Logger) (*OrgAccessValidator, error) {
 	cfg := rest.CopyConfig(restCfg)
-	cfg.Host = replaceClusterPath(cfg.Host, orgWorkspacePath)
+	cfg.Host = replaceClusterPath(cfg.Host, tokenReviewWorkspacePath)
 
 	cs, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
@@ -47,8 +47,7 @@ func NewOrgAccessValidator(restCfg *rest.Config, orgWorkspacePath string, log *l
 }
 
 // replaceClusterPath replaces the /clusters/<path> portion of a KCP host URL
-// with the given workspace path. This lets TokenReview be called against a
-// workspace that has OIDC configured for Keycloak tokens.
+// with the given workspace path so TokenReview targets the correct workspace.
 func replaceClusterPath(host, workspacePath string) string {
 	u, err := url.Parse(host)
 	if err != nil {
