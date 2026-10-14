@@ -41,11 +41,12 @@ type OpenFGAConfig struct {
 }
 
 type SearchIndexConfig struct {
-	WorkspacePath    string
-	OrgWorkspacePath string
-	Group            string
-	Version          string
-	Resource         string
+	WorkspacePath            string
+	OrgWorkspacePath         string
+	TokenReviewWorkspacePath string
+	Group                    string
+	Version                  string
+	Resource                 string
 }
 
 type SearchConfig struct {
@@ -84,11 +85,12 @@ func NewServiceConfig() *ServiceConfig {
 			DefaultRole: "member",
 		},
 		SearchIndex: SearchIndexConfig{
-			WorkspacePath:    "root:providers:search",
-			OrgWorkspacePath: "root:orgs",
-			Group:            "search.platform-mesh.io",
-			Version:          "v1alpha1",
-			Resource:         "searchindices",
+			WorkspacePath:            "root:providers:search",
+			OrgWorkspacePath:         "root:orgs",
+			TokenReviewWorkspacePath: "root:orgs",
+			Group:                    "search.platform-mesh.io",
+			Version:                  "v1alpha1",
+			Resource:                 "searchindices",
 		},
 		Search: SearchConfig{
 			DefaultLimit:   20,
@@ -117,6 +119,7 @@ func (c *ServiceConfig) AddFlags(fs *pflag.FlagSet) {
 
 	fs.StringVar(&c.SearchIndex.WorkspacePath, "searchindex-workspace-path", c.SearchIndex.WorkspacePath, "Workspace path for SearchIndex resources")
 	fs.StringVar(&c.SearchIndex.OrgWorkspacePath, "searchindex-org-workspace-path", c.SearchIndex.OrgWorkspacePath, "Workspace path for organization workspaces")
+	fs.StringVar(&c.SearchIndex.TokenReviewWorkspacePath, "searchindex-token-review-workspace-path", c.SearchIndex.TokenReviewWorkspacePath, "Workspace path used for KCP TokenReview JWT validation")
 	fs.StringVar(&c.SearchIndex.Group, "searchindex-group", c.SearchIndex.Group, "SearchIndex API group")
 	fs.StringVar(&c.SearchIndex.Version, "searchindex-version", c.SearchIndex.Version, "SearchIndex API version")
 	fs.StringVar(&c.SearchIndex.Resource, "searchindex-resource", c.SearchIndex.Resource, "SearchIndex API resource plural")
