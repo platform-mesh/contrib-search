@@ -158,6 +158,35 @@ The problem set is defined once in `internal/httperr` and reused by every endpoi
   - OpenSearch
   - OpenFGA gRPC endpoint
 
+### Run locally against a running Platform Mesh instance
+
+#### Port forwards
+
+```sh
+# Opensearch
+kubectl --kubeconfig ~/.kube/config port-forward -n platform-mesh-system svc/opensearch-cluster-master 9200:9200
+```
+
+```sh
+# OpenFGA
+kubectl --kubeconfig ~/.kube/config port-forward -n platform-mesh-system svc/openfga 8081:8081
+```
+
+```sh
+cp .env.example .env
+```
+
+Fill the values and run:
+
+```sh
+go run . serve \
+  --kubeconfig ~/.kube/config \
+  --is-local=true \
+  --opensearch-url http://localhost:9200 \
+  --openfga-grpc-addr localhost:8081
+  --api-export-endpoint-slice-name=search.platform-mesh.io
+```
+
 ### Run locally
 
 Example:

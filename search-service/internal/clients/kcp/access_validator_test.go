@@ -29,6 +29,43 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 )
 
+func TestNewOrgAccessValidatorStripsClusterPath(t *testing.T) {
+	tests := []struct {
+		name          string
+		host          string
+		workspacePath string
+		wantHost      string
+	}{
+		{
+			name:          "replaces workspace path",
+			host:          "https://frontproxy:443/clusters/root:providers:search",
+			workspacePath: "root:orgs",
+			wantHost:      "https://frontproxy:443/clusters/root:orgs",
+		},
+		{
+			name:          "replaces nested cluster path",
+			host:          "https://frontproxy:443/clusters/root:orgs:sap",
+			workspacePath: "root:orgs",
+			wantHost:      "https://frontproxy:443/clusters/root:orgs",
+		},
+		{
+			name:          "no cluster path left unchanged",
+			host:          "https://kube-apiserver:6443",
+			workspacePath: "root:orgs",
+			wantHost:      "https://kube-apiserver:6443",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := replaceClusterPath(tc.host, tc.workspacePath)
+			if got != tc.wantHost {
+				t.Fatalf("host after replace: got %q, want %q", got, tc.wantHost)
+			}
+		})
+	}
+}
+
 func TestOrgAccessValidatorValidateTokenForOrg(t *testing.T) {
 	tests := []struct {
 		name          string
