@@ -3,7 +3,7 @@ module go.platform-mesh.io/search-service
 go 1.26.0
 
 require (
-	github.com/go-chi/chi/v5 v5.3.0
+	github.com/go-chi/chi/v5 v5.4.0
 	github.com/go-chi/cors v1.2.2
 	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/openfga/api/proto v0.0.0-20260319214821-f153694bfc20
