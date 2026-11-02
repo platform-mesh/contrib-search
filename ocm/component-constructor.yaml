@@ -1,0 +1,11 @@
+components:
+  - name: github.com/platform-mesh/search
+    version: 0.1.0
+    provider:
+      name: platform-mesh
+    resources:
+      - name: chart
+        type: helmChart
+        relation: local
+        version: ${SEARCH_VERSION}
+        access:

@@ -1,0 +1,7 @@
+components:
+  search-operator:
+    path: search-operator
+    image: search-operator
+  search-service:
+    path: search-service
+    image: search-service
