@@ -172,7 +172,7 @@ func (s *SearchIndexResolver) resolveOrganizationClusterID(ctx context.Context, 
 	return clusterID, nil
 }
 
-func (s *SearchIndexResolver) listSearchIndicesForOrg(ctx context.Context, orgClusterID string) (pmsearchv1alpha1.SearchIndexList, error) {
+func (s *SearchIndexResolver) listSearchIndicesForOrg(ctx context.Context, orgClusterID string) (searchIndexList, error) {
 	list, err := listSearchIndices(ctx, s.searchIndexClient, s.cfg, orgClusterID)
 	if err != nil {
 		return list, err
@@ -212,8 +212,8 @@ func (s *SearchIndexResolver) listSearchIndicesForOrg(ctx context.Context, orgCl
 	return list, nil
 }
 
-func listSearchIndices(ctx context.Context, client dynamic.Interface, cfg config.SearchIndexConfig, orgClusterID string) (pmsearchv1alpha1.SearchIndexList, error) {
-	var list pmsearchv1alpha1.SearchIndexList
+func listSearchIndices(ctx context.Context, client dynamic.Interface, cfg config.SearchIndexConfig, orgClusterID string) (searchIndexList, error) {
+	var list searchIndexList
 
 	listOpts := metav1.ListOptions{}
 	if orgClusterID != "" {
@@ -225,20 +225,35 @@ func listSearchIndices(ctx context.Context, client dynamic.Interface, cfg config
 		return list, err
 	}
 
-	items := make([]pmsearchv1alpha1.SearchIndex, 0, len(objList.Items))
+	items := make([]searchIndexItem, 0, len(objList.Items))
 	for _, item := range objList.Items {
 		searchIndex := pmsearchv1alpha1.SearchIndex{}
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(item.Object, &searchIndex); err != nil {
 			return list, fmt.Errorf("decode SearchIndex %q: %w", item.GetName(), err)
 		}
-		items = append(items, searchIndex)
+		fieldTypes, _, err := unstructured.NestedStringMap(item.Object, "spec", "defaultFieldTypes")
+		if err != nil {
+			return list, fmt.Errorf("decode SearchIndex %q defaultFieldTypes: %w", item.GetName(), err)
+		}
+		items = append(items, searchIndexItem{SearchIndex: searchIndex, defaultFieldTypes: fieldTypes})
 	}
 
 	list.Items = items
 	return list, nil
 }
 
-func mapSearchIndexRef(item pmsearchv1alpha1.SearchIndex, orgClusterID string, cfg config.SearchIndexConfig) (search.SearchIndexRef, bool) {
+// searchIndexItem carries spec.defaultFieldTypes, which the published
+// go.platform-mesh.io/apis SearchIndex type does not declare yet.
+type searchIndexItem struct {
+	pmsearchv1alpha1.SearchIndex
+	defaultFieldTypes map[string]string
+}
+
+type searchIndexList struct {
+	Items []searchIndexItem
+}
+
+func mapSearchIndexRef(item searchIndexItem, orgClusterID string, cfg config.SearchIndexConfig) (search.SearchIndexRef, bool) {
 	indexName := strings.TrimSpace(item.Status.IndexName)
 	if indexName == "" {
 		indexName = strings.TrimSpace(item.Name)
@@ -262,11 +277,25 @@ func mapSearchIndexRef(item pmsearchv1alpha1.SearchIndex, orgClusterID string, c
 		IndexPrefix:           strings.TrimSpace(item.Spec.IndexPrefix),
 		OrganizationClusterID: orgID,
 		DefaultFields:         stringset.DedupeSorted(item.Spec.DefaultFields),
+		DefaultFieldTypes:     cleanFieldTypes(item.defaultFieldTypes),
 		FilterableFields:      stringset.DedupeSorted(item.Spec.FilterableFields),
 		SemanticFields:        stringset.DedupeSorted(item.Spec.SemanticFields),
 		Group:                 cfg.Group,
 		Version:               cfg.Version,
 	}, true
+}
+
+func cleanFieldTypes(types map[string]string) map[string]string {
+	if len(types) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(types))
+	for field, fieldType := range types {
+		if field = strings.TrimSpace(field); field != "" && fieldType != "" {
+			out[field] = fieldType
+		}
+	}
+	return out
 }
 
 func deriveResourceName(name, indexPrefix, orgClusterID string) string {
