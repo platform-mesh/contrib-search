@@ -24,8 +24,8 @@ import (
 	"slices"
 	"strings"
 
-	pmsearchv1alpha1 "go.platform-mesh.io/apis/search/v1alpha1"
 	"go.platform-mesh.io/golang-commons/logger"
+	pmsearchv1alpha1 "go.platform-mesh.io/search-operator/api/v1alpha1"
 	"go.platform-mesh.io/search-service/internal/config"
 	"go.platform-mesh.io/search-service/internal/service/search"
 	"go.platform-mesh.io/search-service/internal/stringset"
@@ -172,7 +172,7 @@ func (s *SearchIndexResolver) resolveOrganizationClusterID(ctx context.Context, 
 	return clusterID, nil
 }
 
-func (s *SearchIndexResolver) listSearchIndicesForOrg(ctx context.Context, orgClusterID string) (searchIndexList, error) {
+func (s *SearchIndexResolver) listSearchIndicesForOrg(ctx context.Context, orgClusterID string) (pmsearchv1alpha1.SearchIndexList, error) {
 	list, err := listSearchIndices(ctx, s.searchIndexClient, s.cfg, orgClusterID)
 	if err != nil {
 		return list, err
@@ -212,8 +212,8 @@ func (s *SearchIndexResolver) listSearchIndicesForOrg(ctx context.Context, orgCl
 	return list, nil
 }
 
-func listSearchIndices(ctx context.Context, client dynamic.Interface, cfg config.SearchIndexConfig, orgClusterID string) (searchIndexList, error) {
-	var list searchIndexList
+func listSearchIndices(ctx context.Context, client dynamic.Interface, cfg config.SearchIndexConfig, orgClusterID string) (pmsearchv1alpha1.SearchIndexList, error) {
+	var list pmsearchv1alpha1.SearchIndexList
 
 	listOpts := metav1.ListOptions{}
 	if orgClusterID != "" {
@@ -225,35 +225,20 @@ func listSearchIndices(ctx context.Context, client dynamic.Interface, cfg config
 		return list, err
 	}
 
-	items := make([]searchIndexItem, 0, len(objList.Items))
+	items := make([]pmsearchv1alpha1.SearchIndex, 0, len(objList.Items))
 	for _, item := range objList.Items {
 		searchIndex := pmsearchv1alpha1.SearchIndex{}
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(item.Object, &searchIndex); err != nil {
 			return list, fmt.Errorf("decode SearchIndex %q: %w", item.GetName(), err)
 		}
-		fieldTypes, _, err := unstructured.NestedStringMap(item.Object, "spec", "defaultFieldTypes")
-		if err != nil {
-			return list, fmt.Errorf("decode SearchIndex %q defaultFieldTypes: %w", item.GetName(), err)
-		}
-		items = append(items, searchIndexItem{SearchIndex: searchIndex, defaultFieldTypes: fieldTypes})
+		items = append(items, searchIndex)
 	}
 
 	list.Items = items
 	return list, nil
 }
 
-// searchIndexItem carries spec.defaultFieldTypes, which the published
-// go.platform-mesh.io/apis SearchIndex type does not declare yet.
-type searchIndexItem struct {
-	pmsearchv1alpha1.SearchIndex
-	defaultFieldTypes map[string]string
-}
-
-type searchIndexList struct {
-	Items []searchIndexItem
-}
-
-func mapSearchIndexRef(item searchIndexItem, orgClusterID string, cfg config.SearchIndexConfig) (search.SearchIndexRef, bool) {
+func mapSearchIndexRef(item pmsearchv1alpha1.SearchIndex, orgClusterID string, cfg config.SearchIndexConfig) (search.SearchIndexRef, bool) {
 	indexName := strings.TrimSpace(item.Status.IndexName)
 	if indexName == "" {
 		indexName = strings.TrimSpace(item.Name)
@@ -277,7 +262,7 @@ func mapSearchIndexRef(item searchIndexItem, orgClusterID string, cfg config.Sea
 		IndexPrefix:           strings.TrimSpace(item.Spec.IndexPrefix),
 		OrganizationClusterID: orgID,
 		DefaultFields:         stringset.DedupeSorted(item.Spec.DefaultFields),
-		DefaultFieldTypes:     cleanFieldTypes(item.defaultFieldTypes),
+		DefaultFieldTypes:     defaultFieldTypes(item.Spec.DefaultFieldTypes),
 		FilterableFields:      stringset.DedupeSorted(item.Spec.FilterableFields),
 		SemanticFields:        stringset.DedupeSorted(item.Spec.SemanticFields),
 		Group:                 cfg.Group,
@@ -285,14 +270,14 @@ func mapSearchIndexRef(item searchIndexItem, orgClusterID string, cfg config.Sea
 	}, true
 }
 
-func cleanFieldTypes(types map[string]string) map[string]string {
+func defaultFieldTypes(types map[string]pmsearchv1alpha1.FieldType) map[string]string {
 	if len(types) == 0 {
 		return nil
 	}
 	out := make(map[string]string, len(types))
 	for field, fieldType := range types {
 		if field = strings.TrimSpace(field); field != "" && fieldType != "" {
-			out[field] = fieldType
+			out[field] = string(fieldType)
 		}
 	}
 	return out
