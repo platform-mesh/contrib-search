@@ -65,3 +65,5 @@ cmd/release/release
 # Local git config
 .gitconfig
 .gitmessage
+
+ocm/.generated
