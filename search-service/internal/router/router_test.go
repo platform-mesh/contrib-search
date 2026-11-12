@@ -659,6 +659,63 @@ func TestCreateRouterResourceParamTakesPrecedence(t *testing.T) {
 	}
 }
 
+func TestCreateRouterSearchPassesFieldsParam(t *testing.T) {
+	svc := &fakeSearchService{}
+	r := CreateRouter(svc, []func(http.Handler) http.Handler{
+		withRequestContext(appcontext.RequestContext{Organization: "acme", User: "alice@example.com"}),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/rest/v1/search?q=hello&fields=kind,name", nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if len(svc.lastReq.Fields) != 2 {
+		t.Fatalf("expected 2 fields, got %v", svc.lastReq.Fields)
+	}
+	if svc.lastReq.Fields[0] != "kind" || svc.lastReq.Fields[1] != "name" {
+		t.Fatalf("expected [kind name], got %v", svc.lastReq.Fields)
+	}
+}
+
+func TestCreateRouterSearchNoFieldsParamLeavesFieldsNil(t *testing.T) {
+	svc := &fakeSearchService{}
+	r := CreateRouter(svc, []func(http.Handler) http.Handler{
+		withRequestContext(appcontext.RequestContext{Organization: "acme", User: "alice@example.com"}),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/rest/v1/search?q=hello", nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if len(svc.lastReq.Fields) != 0 {
+		t.Fatalf("expected no fields, got %v", svc.lastReq.Fields)
+	}
+}
+
+func TestCreateRouterSearchFieldsWithWhitespace(t *testing.T) {
+	svc := &fakeSearchService{}
+	r := CreateRouter(svc, []func(http.Handler) http.Handler{
+		withRequestContext(appcontext.RequestContext{Organization: "acme", User: "alice@example.com"}),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/rest/v1/search?q=hello&fields=+kind+,+name+,+", nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if len(svc.lastReq.Fields) != 2 {
+		t.Fatalf("expected 2 fields after trimming blanks, got %v", svc.lastReq.Fields)
+	}
+}
+
 func TestCORSPreflightReturns200(t *testing.T) {
 	paths := []string{
 		"/rest/v1/search",
@@ -699,5 +756,32 @@ func TestErrorContractAcrossEndpoints(t *testing.T) {
 				t.Fatal("backend details leaked")
 			}
 		})
+	}
+}
+
+func TestParseCommaSeparatedParam(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want []string
+	}{
+		{"", nil},
+		{"  ", nil},
+		{"name", []string{"name"}},
+		{"name,kind", []string{"name", "kind"}},
+		{" name , kind ", []string{"name", "kind"}},
+		{"name,,kind", []string{"name", "kind"}},
+		{",", nil},
+	}
+	for _, tt := range cases {
+		got := parseCommaSeparatedParam(tt.raw)
+		if len(got) != len(tt.want) {
+			t.Errorf("parseCommaSeparatedParam(%q) = %v, want %v", tt.raw, got, tt.want)
+			continue
+		}
+		for i, v := range got {
+			if v != tt.want[i] {
+				t.Errorf("parseCommaSeparatedParam(%q)[%d] = %q, want %q", tt.raw, i, v, tt.want[i])
+			}
+		}
 	}
 }

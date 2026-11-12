@@ -32,6 +32,7 @@ type CursorState struct {
 	Mode        string `json:"m,omitzero"`
 	Resource    string `json:"r,omitzero"`
 	FiltersHash string `json:"fh,omitzero"`
+	FieldsHash  string `json:"fields_h,omitzero"`
 	Sort        string `json:"s,omitzero"`
 	Limit       int    `json:"l"`
 	SearchAfter []any  `json:"sa"`
@@ -77,7 +78,7 @@ func DecodeCursor(token string) (CursorState, error) {
 	return state, nil
 }
 
-func ValidateCursor(state CursorState, org, qHash, mode, resource, fHash, sort string, limit int) error {
+func ValidateCursor(state CursorState, org, qHash, mode, resource, fHash, fieldsHash, sort string, limit int) error {
 	if state.Org != org {
 		return fmt.Errorf("%w: org mismatch", ErrInvalidCursor)
 	}
@@ -92,6 +93,9 @@ func ValidateCursor(state CursorState, org, qHash, mode, resource, fHash, sort s
 	}
 	if state.FiltersHash != fHash {
 		return fmt.Errorf("%w: filters mismatch", ErrInvalidCursor)
+	}
+	if state.FieldsHash != fieldsHash {
+		return fmt.Errorf("%w: fields mismatch", ErrInvalidCursor)
 	}
 	if state.Sort != sort {
 		return fmt.Errorf("%w: sort mismatch", ErrInvalidCursor)

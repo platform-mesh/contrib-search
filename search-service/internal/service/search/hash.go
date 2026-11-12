@@ -22,6 +22,8 @@ import (
 	"maps"
 	"slices"
 	"strings"
+
+	"go.platform-mesh.io/search-service/internal/stringset"
 )
 
 func queryHash(q string) string {
@@ -76,4 +78,13 @@ func cursorFiltersHash(filters map[string][]string, fgaRole string) string {
 	filtersWithRole["fga_role"] = []string{fgaRole}
 
 	return filtersHash(filtersWithRole)
+}
+
+func cursorFieldsHash(fields []string) string {
+	fields = stringset.DedupeSorted(fields)
+	if len(fields) == 0 {
+		return ""
+	}
+	h := sha256.Sum256([]byte(strings.Join(fields, ",")))
+	return hex.EncodeToString(h[:])
 }

@@ -115,6 +115,7 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (SearchResponse
 	if user == "" {
 		return SearchResponse{}, fmt.Errorf("%w: user is required", ErrInvalidRequest)
 	}
+	isAutoMode := strings.TrimSpace(req.Mode) == ""
 	mode, err := normalizeMode(req.Mode)
 	if err != nil {
 		return SearchResponse{}, err
@@ -170,6 +171,7 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (SearchResponse
 
 	qHash := queryHash(query)
 	fHash := cursorFiltersHash(filters, fgaRole)
+	fieldHash := cursorFieldsHash(req.Fields)
 	sort := cursorSort(sortField, sortOrder)
 	var searchAfter []any
 	if req.Cursor != "" {
@@ -177,7 +179,7 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (SearchResponse
 		if err != nil {
 			return SearchResponse{}, err
 		}
-		if err := ValidateCursor(decoded, org, qHash, mode, resource, fHash, sort, limit); err != nil {
+		if err := ValidateCursor(decoded, org, qHash, mode, resource, fHash, fieldHash, sort, limit); err != nil {
 			log.Error().Err(err).Str("searchmode", mode).Str("cursor", req.Cursor).Msg("invalid cursor")
 			return SearchResponse{}, err
 		}
@@ -211,12 +213,14 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (SearchResponse
 	}
 
 	var (
-		indices         []string
-		resourceByIndex map[string]string
-		searchFields    []string
-		semanticFields  []string
-		filterQuery     map[string][]string
-		indexSortField  string
+		indices                []string
+		resourceByIndex        map[string]string
+		searchFields           []string
+		exactFields            []string
+		semanticFields         []string
+		filterableSearchFields []string
+		filterQuery            map[string][]string
+		indexSortField         string
 	)
 
 	if resource != "" {
@@ -239,8 +243,17 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (SearchResponse
 
 		indices = []string{indexRef.IndexName}
 		resourceByIndex = map[string]string{indexRef.IndexName: indexRef.Resource}
-		searchFields = stringset.DedupeSorted(indexRef.DefaultFields)
-		semanticFields = stringset.DedupeSorted(indexRef.SemanticFields)
+		if len(req.Fields) > 0 {
+			exactFields, semanticFields, filterableSearchFields, err = dispatchFields(req.Fields, indexRef, req.Mode)
+			if err != nil {
+				return SearchResponse{}, err
+			}
+		} else {
+			searchFields = stringset.DedupeSorted(indexRef.DefaultFields)
+			if mode == SearchModeSemantic || isAutoMode {
+				semanticFields = stringset.DedupeSorted(indexRef.SemanticFields)
+			}
+		}
 		filterQuery = filters
 	} else {
 		indexRefs, err := s.resolver.ListIndices(ctx, org)
@@ -253,7 +266,14 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (SearchResponse
 		if len(indices) == 0 {
 			return SearchResponse{}, fmt.Errorf("%w: org %q", ErrIndexUnavailable, org)
 		}
-		searchFields = searchableFieldsForRefs(indexRefs)
+		if len(req.Fields) > 0 {
+			exactFields, semanticFields, filterableSearchFields, err = dispatchFieldsMultiIndex(req.Fields, indexRefs)
+			if err != nil {
+				return SearchResponse{}, err
+			}
+		} else {
+			searchFields = searchableFieldsForRefs(indexRefs)
+		}
 	}
 
 	log.Debug().
@@ -275,17 +295,19 @@ func (s *Service) Search(ctx context.Context, req SearchRequest) (SearchResponse
 outer:
 	for len(results) < limit {
 		page, err := s.searcher.Search(ctx, OpenSearchQuery{
-			Indices:           indices,
-			Query:             query,
-			Mode:              mode,
-			Fields:            searchFields,
-			SemanticFields:    semanticFields,
-			Filters:           filterQuery,
-			AccountFGAObjects: accountFGAObjects,
-			Size:              s.cfg.FetchBatchSize,
-			SearchAfter:       searchAfter,
-			SortField:         indexSortField,
-			SortOrder:         sortOrder,
+			Indices:                indices,
+			Query:                  query,
+			Mode:                   mode,
+			Fields:                 searchFields,
+			ExactFields:            exactFields,
+			SemanticFields:         semanticFields,
+			FilterableSearchFields: filterableSearchFields,
+			Filters:                filterQuery,
+			AccountFGAObjects:      accountFGAObjects,
+			Size:                   s.cfg.FetchBatchSize,
+			SearchAfter:            searchAfter,
+			SortField:              indexSortField,
+			SortOrder:              sortOrder,
 		})
 		s.metrics.AddOpenSearchCalls(1)
 		if err != nil {
@@ -365,6 +387,7 @@ outer:
 			Mode:        mode,
 			Resource:    resource,
 			FiltersHash: fHash,
+			FieldsHash:  fieldHash,
 			Sort:        sort,
 			Limit:       limit,
 			SearchAfter: nextSearchAfter,
@@ -572,6 +595,8 @@ func responseSource(source map[string]any) map[string]any {
 	out := make(map[string]any, len(source))
 	maps.Copy(out, source)
 
+	delete(out, "semantic_fields")
+
 	if defaultFields, ok := out["default_fields"].(map[string]any); ok {
 		out["default_fields"] = flattenMap(defaultFields)
 	}
@@ -706,6 +731,102 @@ func validateFiltersAllowed(filters map[string][]string, allowedFields []string)
 	return nil
 }
 
+// dispatchFields classifies caller-provided field names into exactFields, semanticFields,
+// and filterableSearchFields based on the index schema. rawMode="" triggers auto-dispatch
+// (all categories kept); "lexical" suppresses semanticFields; "semantic" suppresses
+// exactFields and filterableSearchFields.
+func dispatchFields(callerFields []string, indexRef SearchIndexRef, rawMode string) (exactFields, semanticFields, filterableSearchFields []string, err error) {
+	deduped := stringset.DedupeSorted(callerFields)
+	if len(deduped) == 0 {
+		return nil, nil, nil, fmt.Errorf("%w: fields must not be empty", ErrInvalidRequest)
+	}
+
+	defaultSet := fieldSet(indexRef.DefaultFields)
+	semanticSet := fieldSet(indexRef.SemanticFields)
+	filterableSet := fieldSet(indexRef.FilterableFields)
+
+	for _, f := range deduped {
+		_, isDefault := defaultSet[f]
+		_, isSemantic := semanticSet[f]
+		_, isFilterable := filterableSet[f]
+		if !isDefault && !isSemantic && !isFilterable {
+			return nil, nil, nil, fmt.Errorf("%w: field %q is not a searchable field for resource %q", ErrInvalidRequest, f, indexRef.Resource)
+		}
+		if isDefault {
+			exactFields = append(exactFields, f)
+		}
+		if isSemantic {
+			semanticFields = append(semanticFields, f)
+		}
+		if isFilterable && !isDefault && !isSemantic {
+			filterableSearchFields = append(filterableSearchFields, f)
+		}
+	}
+
+	switch strings.ToLower(strings.TrimSpace(rawMode)) {
+	case SearchModeLexical:
+		semanticFields = nil
+		if len(exactFields) == 0 && len(filterableSearchFields) == 0 {
+			return nil, nil, nil, fmt.Errorf(
+				"%w: none of the specified fields are lexical fields for resource %q",
+				ErrInvalidRequest, indexRef.Resource,
+			)
+		}
+	case SearchModeSemantic:
+		exactFields = nil
+		filterableSearchFields = nil
+		if len(semanticFields) == 0 {
+			return nil, nil, nil, fmt.Errorf(
+				"%w: none of the specified fields are semantic fields for resource %q",
+				ErrInvalidRequest, indexRef.Resource,
+			)
+		}
+	}
+
+	return exactFields, semanticFields, filterableSearchFields, nil
+}
+
+func dispatchFieldsMultiIndex(callerFields []string, indexRefs []SearchIndexRef) (exactFields, semanticFields, filterableSearchFields []string, err error) {
+	deduped := stringset.DedupeSorted(callerFields)
+	if len(deduped) == 0 {
+		return nil, nil, nil, fmt.Errorf("%w: fields must not be empty", ErrInvalidRequest)
+	}
+
+	allDefaultSet := make(map[string]struct{})
+	allSemanticSet := make(map[string]struct{})
+	allFilterableSet := make(map[string]struct{})
+	for _, ref := range indexRefs {
+		for f := range fieldSet(ref.DefaultFields) {
+			allDefaultSet[f] = struct{}{}
+		}
+		for f := range fieldSet(ref.SemanticFields) {
+			allSemanticSet[f] = struct{}{}
+		}
+		for f := range fieldSet(ref.FilterableFields) {
+			allFilterableSet[f] = struct{}{}
+		}
+	}
+
+	for _, f := range deduped {
+		_, isDefault := allDefaultSet[f]
+		_, isSemantic := allSemanticSet[f]
+		_, isFilterable := allFilterableSet[f]
+		if !isDefault && !isSemantic && !isFilterable {
+			return nil, nil, nil, fmt.Errorf("%w: field %q is not a searchable field", ErrInvalidRequest, f)
+		}
+		if isDefault {
+			exactFields = append(exactFields, f)
+		}
+		if isSemantic {
+			semanticFields = append(semanticFields, f)
+		}
+		if isFilterable && !isDefault && !isSemantic {
+			filterableSearchFields = append(filterableSearchFields, f)
+		}
+	}
+	return exactFields, semanticFields, filterableSearchFields, nil
+}
+
 func fieldSet(values []string) map[string]struct{} {
 	out := make(map[string]struct{}, len(values))
 	for _, value := range values {
@@ -723,10 +844,8 @@ func prefixedDocumentField(prefix, field string) string {
 	if field == "" {
 		return ""
 	}
-	for _, existingPrefix := range []string{"default_fields.", "semantic_fields.", "filterable_fields."} {
-		if strings.HasPrefix(field, existingPrefix) {
-			return field
-		}
+	for _, p := range []string{"default_fields.", "semantic_fields.", "filterable_fields."} {
+		field = strings.TrimPrefix(field, p)
 	}
 	return prefix + "." + field
 }

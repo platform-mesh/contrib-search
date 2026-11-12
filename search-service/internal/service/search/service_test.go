@@ -887,6 +887,202 @@ func TestFilterValuesRejectsMissingUser(t *testing.T) {
 	}
 }
 
+func TestSearchPassesExactFieldsWhenFieldsSpecified(t *testing.T) {
+	searcher := &fakeSearcher{pages: []OpenSearchPage{
+		{Hits: []OpenSearchHit{{ID: "1", Sort: []any{1.0, "1"}, Source: map[string]any{"id": "1"}}}},
+	}}
+	svc := NewService(
+		fakeResolver{index: SearchIndexRef{IndexName: "idx", DefaultFields: []string{"kind", "name"}}},
+		searcher,
+		&fakeAuthorizer{},
+		nil,
+		ServiceConfig{},
+	)
+	_, err := svc.Search(context.Background(), SearchRequest{
+		Organization: "acme", User: "alice@example.com", Query: "foo",
+		Fields: []string{"kind"},
+	})
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+	if len(searcher.reqs) == 0 {
+		t.Fatal("expected at least one searcher call")
+	}
+	if len(searcher.reqs[0].ExactFields) != 1 || searcher.reqs[0].ExactFields[0] != "kind" {
+		t.Fatalf("expected ExactFields=[kind], got %v", searcher.reqs[0].ExactFields)
+	}
+}
+
+func TestSearchExactFieldsUsedWhenFieldsSpecified(t *testing.T) {
+	searcher := &fakeSearcher{pages: []OpenSearchPage{
+		{Hits: []OpenSearchHit{{ID: "1", Sort: []any{1.0, "1"}, Source: map[string]any{"id": "1"}}}},
+	}}
+	svc := NewService(
+		fakeResolver{index: SearchIndexRef{
+			IndexName:     "idx",
+			DefaultFields: []string{"kind", "name", "workspace_path"},
+		}},
+		searcher,
+		&fakeAuthorizer{},
+		nil,
+		ServiceConfig{},
+	)
+	_, err := svc.Search(context.Background(), SearchRequest{
+		Organization: "acme", User: "alice@example.com", Query: "foo",
+		Fields: []string{"kind", "name"},
+	})
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+	if len(searcher.reqs) == 0 {
+		t.Fatal("no searcher calls")
+	}
+	req := searcher.reqs[0]
+	if len(req.Fields) != 0 {
+		t.Fatalf("expected Fields empty when ExactFields used, got %v", req.Fields)
+	}
+	if len(req.ExactFields) != 2 {
+		t.Fatalf("expected ExactFields=[kind name], got %v", req.ExactFields)
+	}
+	if req.ExactFields[0] != "kind" || req.ExactFields[1] != "name" {
+		t.Fatalf("unexpected ExactFields %v", req.ExactFields)
+	}
+}
+
+func TestSearchHybridSemanticIncludedWhenFieldsOverlapSemanticFields(t *testing.T) {
+	searcher := &fakeSearcher{pages: []OpenSearchPage{
+		{Hits: []OpenSearchHit{{ID: "1", Sort: []any{1.0, "1"}, Source: map[string]any{"id": "1"}}}},
+	}}
+	svc := NewService(
+		fakeResolver{index: SearchIndexRef{
+			IndexName:      "idx",
+			DefaultFields:  []string{"kind", "description"},
+			SemanticFields: []string{"description"},
+		}},
+		searcher,
+		&fakeAuthorizer{},
+		nil,
+		ServiceConfig{},
+	)
+	_, err := svc.Search(context.Background(), SearchRequest{
+		Organization: "acme", User: "alice@example.com", Query: "foo",
+		Resource: "accounts",
+		Fields:   []string{"kind", "description"},
+	})
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+	if len(searcher.reqs) == 0 {
+		t.Fatal("no searcher calls")
+	}
+	req := searcher.reqs[0]
+	if len(req.SemanticFields) != 1 || req.SemanticFields[0] != "description" {
+		t.Fatalf("expected SemanticFields=[description], got %v", req.SemanticFields)
+	}
+	if len(req.ExactFields) != 2 {
+		t.Fatalf("expected ExactFields=[description kind], got %v", req.ExactFields)
+	}
+	if req.Mode != SearchModeLexical {
+		t.Fatalf("expected mode lexical, got %q", req.Mode)
+	}
+}
+
+func TestSearchNoFieldsSpecifiedBehaviourUnchanged(t *testing.T) {
+	searcher := &fakeSearcher{pages: []OpenSearchPage{
+		{Hits: []OpenSearchHit{{ID: "1", Sort: []any{1.0, "1"}, Source: map[string]any{"id": "1"}}}},
+	}}
+	svc := NewService(
+		fakeResolver{index: SearchIndexRef{
+			IndexName:     "idx",
+			DefaultFields: []string{"kind", "name"},
+		}},
+		searcher,
+		&fakeAuthorizer{},
+		nil,
+		ServiceConfig{},
+	)
+	_, err := svc.Search(context.Background(), SearchRequest{
+		Organization: "acme", User: "alice@example.com", Query: "foo",
+	})
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+	req := searcher.reqs[0]
+	if len(req.ExactFields) != 0 {
+		t.Fatalf("expected no ExactFields, got %v", req.ExactFields)
+	}
+	if len(req.Fields) == 0 {
+		t.Fatal("expected Fields populated from DefaultFields")
+	}
+}
+
+func TestSearchResponseStripsSemanticFields(t *testing.T) {
+	source := map[string]any{
+		"id":              "1",
+		"kind":            "Account",
+		"default_fields":  map[string]any{"kind": "Account"},
+		"semantic_fields": map[string]any{"description": map[string]any{"embedding": []float64{0.1, 0.2}}},
+	}
+	searcher := &fakeSearcher{pages: []OpenSearchPage{
+		{Hits: []OpenSearchHit{{ID: "1", Sort: []any{1.0, "1"}, Source: source}}},
+	}}
+	svc := NewService(
+		fakeResolver{index: SearchIndexRef{IndexName: "idx"}},
+		searcher,
+		&fakeAuthorizer{results: []AuthorizationResult{{Allowed: []bool{true}}}},
+		nil,
+		ServiceConfig{},
+	)
+	resp, err := svc.Search(context.Background(), SearchRequest{
+		Organization: "acme", User: "alice@example.com", Query: "foo",
+	})
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+	if len(resp.Results) == 0 {
+		t.Fatal("expected results")
+	}
+	if _, ok := resp.Results[0].Source["semantic_fields"]; ok {
+		t.Fatal("semantic_fields must be stripped from source")
+	}
+}
+
+func TestSearchFieldsCursorHashPreventsCrossFieldReuse(t *testing.T) {
+	// Build a cursor that was encoded with fields=["kind"]
+	cursor, err := EncodeCursor(CursorState{
+		Org:         "acme",
+		QueryHash:   queryHash("foo"),
+		Mode:        SearchModeLexical,
+		FiltersHash: cursorFiltersHash(nil, ""),
+		FieldsHash:  cursorFieldsHash([]string{"kind"}),
+		Limit:       20,
+		SearchAfter: []any{1.0, "x"},
+	})
+	if err != nil {
+		t.Fatalf("EncodeCursor returned error: %v", err)
+	}
+
+	svc := NewService(
+		fakeResolver{index: SearchIndexRef{IndexName: "idx"}},
+		&fakeSearcher{},
+		&fakeAuthorizer{},
+		nil,
+		ServiceConfig{},
+	)
+
+	// Reuse the cursor with a different fields param — must fail
+	_, err = svc.Search(context.Background(), SearchRequest{
+		Organization: "acme",
+		User:         "alice@example.com",
+		Query:        "foo",
+		Fields:       []string{"name"}, // different from cursor's "kind"
+		Cursor:       cursor,
+	})
+	if !errors.Is(err, ErrInvalidCursor) {
+		t.Fatalf("expected ErrInvalidCursor, got %v", err)
+	}
+}
+
 func TestSearchFlattensDefaultFieldsInResponse(t *testing.T) {
 	searcher := &fakeSearcher{pages: []OpenSearchPage{
 		{Hits: []OpenSearchHit{
@@ -946,5 +1142,496 @@ func TestSearchFlattensDefaultFieldsInResponse(t *testing.T) {
 	}
 	if _, exists := defaultFields["metadata"]; exists {
 		t.Fatalf("nested metadata object should not be present in flattened default_fields: %v", defaultFields["metadata"])
+	}
+}
+
+func TestPrefixedDocumentFieldStripsExistingNamespacePrefix(t *testing.T) {
+	cases := []struct {
+		prefix string
+		field  string
+		want   string
+	}{
+		{"filterable_fields", "status", "filterable_fields.status"},
+		{"filterable_fields", "filterable_fields.status", "filterable_fields.status"},
+		{"filterable_fields", "semantic_fields.status", "filterable_fields.status"},
+		{"filterable_fields", "default_fields.status", "filterable_fields.status"},
+		{"default_fields", "semantic_fields.desc", "default_fields.desc"},
+		{"filterable_fields", "", ""},
+	}
+	for _, tt := range cases {
+		got := prefixedDocumentField(tt.prefix, tt.field)
+		if got != tt.want {
+			t.Errorf("prefixedDocumentField(%q, %q) = %q, want %q", tt.prefix, tt.field, got, tt.want)
+		}
+	}
+}
+
+func makeTestIndexRef() SearchIndexRef {
+	return SearchIndexRef{
+		Resource:       "accounts",
+		IndexName:      "idx",
+		DefaultFields:  []string{"kind", "name", "description"},
+		SemanticFields: []string{"description", "summary"},
+	}
+}
+
+func TestDispatchFieldsDefaultOnlyField(t *testing.T) {
+	exact, semantic, filterable, err := dispatchFields([]string{"kind"}, makeTestIndexRef(), "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(exact) != 1 || exact[0] != "kind" {
+		t.Fatalf("exactFields = %v, want [kind]", exact)
+	}
+	if len(semantic) != 0 {
+		t.Fatalf("semanticFields = %v, want []", semantic)
+	}
+	if len(filterable) != 0 {
+		t.Fatalf("filterableSearchFields = %v, want []", filterable)
+	}
+}
+
+func TestDispatchFieldsSemanticOnlyField(t *testing.T) {
+	exact, semantic, filterable, err := dispatchFields([]string{"summary"}, makeTestIndexRef(), "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(exact) != 0 {
+		t.Fatalf("exactFields = %v, want []", exact)
+	}
+	if len(semantic) != 1 || semantic[0] != "summary" {
+		t.Fatalf("semanticFields = %v, want [summary]", semantic)
+	}
+	if len(filterable) != 0 {
+		t.Fatalf("filterableSearchFields = %v, want []", filterable)
+	}
+}
+
+func TestDispatchFieldsBothCategoriesDefaultMode(t *testing.T) {
+	exact, semantic, filterable, err := dispatchFields([]string{"description"}, makeTestIndexRef(), "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(exact) != 1 || exact[0] != "description" {
+		t.Fatalf("exactFields = %v, want [description]", exact)
+	}
+	if len(semantic) != 1 || semantic[0] != "description" {
+		t.Fatalf("semanticFields = %v, want [description]", semantic)
+	}
+	if len(filterable) != 0 {
+		t.Fatalf("filterableSearchFields = %v, want []", filterable)
+	}
+}
+
+func TestDispatchFieldsLexicalModeClearsSemanticFields(t *testing.T) {
+	exact, semantic, _, err := dispatchFields([]string{"kind", "description"}, makeTestIndexRef(), "lexical")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(semantic) != 0 {
+		t.Fatalf("semanticFields = %v, want [] for lexical mode", semantic)
+	}
+	if len(exact) != 2 {
+		t.Fatalf("exactFields = %v, want [description kind]", exact)
+	}
+}
+
+func TestDispatchFieldsLexicalModeErrorsWhenAllFieldsSemanticOnly(t *testing.T) {
+	_, _, _, err := dispatchFields([]string{"summary"}, makeTestIndexRef(), "lexical")
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("expected ErrInvalidRequest, got %v", err)
+	}
+}
+
+func TestDispatchFieldsSemanticModeKeepsOnlySemanticFields(t *testing.T) {
+	exact, semantic, filterable, err := dispatchFields([]string{"kind", "description"}, makeTestIndexRef(), "semantic")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(exact) != 0 {
+		t.Fatalf("exactFields = %v, want []", exact)
+	}
+	if len(filterable) != 0 {
+		t.Fatalf("filterableSearchFields = %v, want []", filterable)
+	}
+	if len(semantic) != 1 || semantic[0] != "description" {
+		t.Fatalf("semanticFields = %v, want [description]", semantic)
+	}
+}
+
+func TestDispatchFieldsSemanticModeErrorsWhenNoSemanticField(t *testing.T) {
+	_, _, _, err := dispatchFields([]string{"kind", "name"}, makeTestIndexRef(), "semantic")
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("expected ErrInvalidRequest, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "semantic") {
+		t.Fatalf("error should mention semantic: %v", err)
+	}
+}
+
+func TestDispatchFieldsRejectsUnknownField(t *testing.T) {
+	_, _, _, err := dispatchFields([]string{"nonexistent"}, makeTestIndexRef(), "")
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("expected ErrInvalidRequest, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "nonexistent") {
+		t.Fatalf("error should name the unknown field: %v", err)
+	}
+}
+
+func TestDispatchFieldsRejectsWhitespaceOnlyFields(t *testing.T) {
+	_, _, _, err := dispatchFields([]string{"  ", "\t"}, makeTestIndexRef(), "")
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("expected ErrInvalidRequest, got %v", err)
+	}
+}
+
+func TestDispatchFieldsDedupesInputFields(t *testing.T) {
+	exact, _, _, err := dispatchFields([]string{"kind", "kind", "name"}, makeTestIndexRef(), "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(exact) != 2 {
+		t.Fatalf("expected 2 deduped fields, got %v", exact)
+	}
+}
+
+func TestSearchLexicalModeExplicitDoesNotBuildHybridQuery(t *testing.T) {
+	searcher := &fakeSearcher{pages: []OpenSearchPage{
+		{Hits: []OpenSearchHit{{ID: "1", Sort: []any{1.0, "1"}, Source: map[string]any{"id": "1"}}}},
+	}}
+	svc := NewService(
+		fakeResolver{index: SearchIndexRef{
+			IndexName:      "idx",
+			DefaultFields:  []string{"kind", "description"},
+			SemanticFields: []string{"description"},
+		}},
+		searcher,
+		&fakeAuthorizer{},
+		nil,
+		ServiceConfig{},
+	)
+	_, err := svc.Search(context.Background(), SearchRequest{
+		Organization: "acme", User: "alice@example.com", Query: "foo",
+		Resource: "accounts",
+		Mode:     "lexical",
+		Fields:   []string{"kind", "description"},
+	})
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+	req := searcher.reqs[0]
+	if len(req.SemanticFields) != 0 {
+		t.Fatalf("expected SemanticFields empty for explicit lexical mode, got %v", req.SemanticFields)
+	}
+	if len(req.ExactFields) != 2 {
+		t.Fatalf("expected ExactFields=[description kind], got %v", req.ExactFields)
+	}
+}
+
+func TestSearchRejectsUnknownFieldName(t *testing.T) {
+	svc := NewService(
+		fakeResolver{index: SearchIndexRef{
+			IndexName:     "idx",
+			DefaultFields: []string{"kind", "name"},
+		}},
+		&fakeSearcher{},
+		&fakeAuthorizer{},
+		nil,
+		ServiceConfig{},
+	)
+	_, err := svc.Search(context.Background(), SearchRequest{
+		Organization: "acme", User: "alice@example.com", Query: "foo",
+		Resource: "accounts",
+		Fields:   []string{"nonexistent"},
+	})
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("expected ErrInvalidRequest, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "nonexistent") {
+		t.Fatalf("error should name the unknown field: %v", err)
+	}
+}
+
+func TestSearchRejectsWhitespaceOnlyFields(t *testing.T) {
+	svc := NewService(
+		fakeResolver{index: SearchIndexRef{
+			IndexName:     "idx",
+			DefaultFields: []string{"kind"},
+		}},
+		&fakeSearcher{},
+		&fakeAuthorizer{},
+		nil,
+		ServiceConfig{},
+	)
+	_, err := svc.Search(context.Background(), SearchRequest{
+		Organization: "acme", User: "alice@example.com", Query: "foo",
+		Resource: "accounts",
+		Fields:   []string{"  ", "\t"},
+	})
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("expected ErrInvalidRequest, got %v", err)
+	}
+}
+
+func TestSearchSemanticModeWithNonSemanticFieldsErrors(t *testing.T) {
+	svc := NewService(
+		fakeResolver{index: SearchIndexRef{
+			IndexName:      "idx",
+			DefaultFields:  []string{"kind", "name"},
+			SemanticFields: []string{"description"},
+		}},
+		&fakeSearcher{},
+		&fakeAuthorizer{},
+		nil,
+		ServiceConfig{},
+	)
+	_, err := svc.Search(context.Background(), SearchRequest{
+		Organization: "acme", User: "alice@example.com", Query: "foo",
+		Resource: "accounts",
+		Mode:     "semantic",
+		Fields:   []string{"kind", "name"},
+	})
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("expected ErrInvalidRequest, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "semantic") {
+		t.Fatalf("error should mention semantic: %v", err)
+	}
+}
+
+func TestSearchMultiIndexRejectsUnknownField(t *testing.T) {
+	svc := NewService(
+		fakeResolver{indices: []SearchIndexRef{
+			{IndexName: "idx-a", DefaultFields: []string{"kind", "name"}},
+			{IndexName: "idx-b", DefaultFields: []string{"kind", "status"}},
+		}},
+		&fakeSearcher{},
+		&fakeAuthorizer{},
+		nil,
+		ServiceConfig{},
+	)
+	_, err := svc.Search(context.Background(), SearchRequest{
+		Organization: "acme", User: "alice@example.com", Query: "foo",
+		Fields: []string{"nonexistent"},
+	})
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("expected ErrInvalidRequest, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "nonexistent") {
+		t.Fatalf("error should name the unknown field: %v", err)
+	}
+}
+
+func TestSearchMultiIndexRejectsWhitespaceOnlyFields(t *testing.T) {
+	svc := NewService(
+		fakeResolver{indices: []SearchIndexRef{
+			{IndexName: "idx-a", DefaultFields: []string{"kind"}},
+		}},
+		&fakeSearcher{},
+		&fakeAuthorizer{},
+		nil,
+		ServiceConfig{},
+	)
+	_, err := svc.Search(context.Background(), SearchRequest{
+		Organization: "acme", User: "alice@example.com", Query: "foo",
+		Fields: []string{"  "},
+	})
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("expected ErrInvalidRequest, got %v", err)
+	}
+}
+
+func TestSearchMultiIndexAcceptsFieldPresentInAnyIndex(t *testing.T) {
+	searcher := &fakeSearcher{pages: []OpenSearchPage{
+		{Hits: []OpenSearchHit{{ID: "1", Sort: []any{1.0, "1"}, Source: map[string]any{"id": "1"}}}},
+	}}
+	svc := NewService(
+		fakeResolver{indices: []SearchIndexRef{
+			{IndexName: "idx-a", DefaultFields: []string{"kind", "name"}},
+			{IndexName: "idx-b", DefaultFields: []string{"kind", "status"}},
+		}},
+		searcher,
+		&fakeAuthorizer{},
+		nil,
+		ServiceConfig{},
+	)
+	_, err := svc.Search(context.Background(), SearchRequest{
+		Organization: "acme", User: "alice@example.com", Query: "foo",
+		Fields: []string{"kind", "status"},
+	})
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+	req := searcher.reqs[0]
+	if len(req.ExactFields) != 2 {
+		t.Fatalf("expected ExactFields=[kind status], got %v", req.ExactFields)
+	}
+}
+
+func TestDispatchFieldsFilterableOnlyFieldRoutedToFilterableSearchFields(t *testing.T) {
+	indexRef := SearchIndexRef{
+		Resource:         "accounts",
+		IndexName:        "idx",
+		DefaultFields:    []string{"kind", "name"},
+		FilterableFields: []string{"status"},
+	}
+	exact, semantic, filterable, err := dispatchFields([]string{"status"}, indexRef, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(exact) != 0 {
+		t.Fatalf("exactFields = %v, want []", exact)
+	}
+	if len(semantic) != 0 {
+		t.Fatalf("semanticFields = %v, want []", semantic)
+	}
+	if len(filterable) != 1 || filterable[0] != "status" {
+		t.Fatalf("filterableSearchFields = %v, want [status]", filterable)
+	}
+}
+
+func TestDispatchFieldsFilterableFieldAlsoInDefaultGoesToExact(t *testing.T) {
+	indexRef := SearchIndexRef{
+		Resource:         "accounts",
+		IndexName:        "idx",
+		DefaultFields:    []string{"status"},
+		FilterableFields: []string{"status"},
+	}
+	exact, _, filterable, err := dispatchFields([]string{"status"}, indexRef, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(exact) != 1 || exact[0] != "status" {
+		t.Fatalf("exactFields = %v, want [status]", exact)
+	}
+	if len(filterable) != 0 {
+		t.Fatalf("filterableSearchFields = %v, want [] (already covered by exactFields)", filterable)
+	}
+}
+
+func TestSearchAutoHybridWhenIndexHasSemanticFields(t *testing.T) {
+	searcher := &fakeSearcher{pages: []OpenSearchPage{
+		{Hits: []OpenSearchHit{{ID: "1", Sort: []any{1.0, "1"}, Source: map[string]any{"id": "1"}}}},
+	}}
+	svc := NewService(
+		fakeResolver{index: SearchIndexRef{
+			IndexName:      "idx",
+			Resource:       "accounts",
+			DefaultFields:  []string{"kind", "description"},
+			SemanticFields: []string{"description"},
+		}},
+		searcher,
+		&fakeAuthorizer{},
+		nil,
+		ServiceConfig{},
+	)
+	_, err := svc.Search(context.Background(), SearchRequest{
+		Organization: "acme", User: "alice@example.com", Query: "foo",
+		Resource: "accounts",
+		// Mode intentionally omitted → auto-hybrid
+	})
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+	if len(searcher.reqs) == 0 {
+		t.Fatal("no searcher calls")
+	}
+	req := searcher.reqs[0]
+	if len(req.SemanticFields) == 0 {
+		t.Fatalf("expected SemanticFields populated for auto-hybrid, got %v", req.SemanticFields)
+	}
+	if len(req.Fields) == 0 {
+		t.Fatal("expected Fields (lexical) populated for auto-hybrid")
+	}
+}
+
+func TestSearchExplicitLexicalModeDoesNotAutoHybrid(t *testing.T) {
+	searcher := &fakeSearcher{pages: []OpenSearchPage{
+		{Hits: []OpenSearchHit{{ID: "1", Sort: []any{1.0, "1"}, Source: map[string]any{"id": "1"}}}},
+	}}
+	svc := NewService(
+		fakeResolver{index: SearchIndexRef{
+			IndexName:      "idx",
+			Resource:       "accounts",
+			DefaultFields:  []string{"kind", "description"},
+			SemanticFields: []string{"description"},
+		}},
+		searcher,
+		&fakeAuthorizer{},
+		nil,
+		ServiceConfig{},
+	)
+	_, err := svc.Search(context.Background(), SearchRequest{
+		Organization: "acme", User: "alice@example.com", Query: "foo",
+		Resource: "accounts",
+		Mode:     "lexical",
+	})
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+	req := searcher.reqs[0]
+	if len(req.SemanticFields) != 0 {
+		t.Fatalf("expected no SemanticFields for explicit lexical mode, got %v", req.SemanticFields)
+	}
+}
+
+func TestSearchMultiIndexDispatchesSemanticFields(t *testing.T) {
+	searcher := &fakeSearcher{pages: []OpenSearchPage{
+		{Hits: []OpenSearchHit{{ID: "1", Sort: []any{1.0, "1"}, Source: map[string]any{"id": "1"}}}},
+	}}
+	svc := NewService(
+		fakeResolver{indices: []SearchIndexRef{
+			{IndexName: "idx-a", DefaultFields: []string{"kind"}, SemanticFields: []string{"summary"}},
+			{IndexName: "idx-b", DefaultFields: []string{"kind", "name"}},
+		}},
+		searcher,
+		&fakeAuthorizer{},
+		nil,
+		ServiceConfig{},
+	)
+	_, err := svc.Search(context.Background(), SearchRequest{
+		Organization: "acme", User: "alice@example.com", Query: "foo",
+		Fields: []string{"kind", "summary"},
+	})
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+	req := searcher.reqs[0]
+	if len(req.ExactFields) != 1 || req.ExactFields[0] != "kind" {
+		t.Fatalf("expected ExactFields=[kind], got %v", req.ExactFields)
+	}
+	if len(req.SemanticFields) != 1 || req.SemanticFields[0] != "summary" {
+		t.Fatalf("expected SemanticFields=[summary], got %v", req.SemanticFields)
+	}
+}
+
+func TestSearchMultiIndexDispatchesFilterableFields(t *testing.T) {
+	searcher := &fakeSearcher{pages: []OpenSearchPage{
+		{Hits: []OpenSearchHit{{ID: "1", Sort: []any{1.0, "1"}, Source: map[string]any{"id": "1"}}}},
+	}}
+	svc := NewService(
+		fakeResolver{indices: []SearchIndexRef{
+			{IndexName: "idx-a", DefaultFields: []string{"kind"}, FilterableFields: []string{"status"}},
+			{IndexName: "idx-b", DefaultFields: []string{"kind"}},
+		}},
+		searcher,
+		&fakeAuthorizer{},
+		nil,
+		ServiceConfig{},
+	)
+	_, err := svc.Search(context.Background(), SearchRequest{
+		Organization: "acme", User: "alice@example.com", Query: "foo",
+		Fields: []string{"kind", "status"},
+	})
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+	req := searcher.reqs[0]
+	if len(req.ExactFields) != 1 || req.ExactFields[0] != "kind" {
+		t.Fatalf("expected ExactFields=[kind], got %v", req.ExactFields)
+	}
+	if len(req.FilterableSearchFields) != 1 || req.FilterableSearchFields[0] != "status" {
+		t.Fatalf("expected FilterableSearchFields=[status], got %v", req.FilterableSearchFields)
 	}
 }
