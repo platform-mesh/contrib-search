@@ -96,3 +96,33 @@ func TestSearchableResourcesFlag(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateSemanticModels(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr bool
+	}{
+		{name: "nothing set"},
+		{name: "model by id", args: []string{"--opensearch-semantic-model-id=m"}},
+		{name: "models by name", args: []string{"--opensearch-semantic-model-name=doc", "--opensearch-semantic-search-model-name=tok"}},
+		{name: "model id and name", args: []string{"--opensearch-semantic-model-id=m", "--opensearch-semantic-model-name=doc"}, wantErr: true},
+		{name: "search model id and name", args: []string{"--opensearch-semantic-model-id=m", "--opensearch-semantic-search-model-id=s", "--opensearch-semantic-search-model-name=tok"}, wantErr: true},
+		{name: "search model without model", args: []string{"--opensearch-semantic-search-model-name=tok"}, wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := NewOperatorConfig()
+			fs := pflag.NewFlagSet("test", pflag.ContinueOnError)
+			cfg.AddFlags(fs)
+			if err := fs.Parse(tc.args); err != nil {
+				t.Fatalf("Parse() error = %v", err)
+			}
+
+			err := cfg.ValidateSemanticModels()
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("ValidateSemanticModels() error = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+}

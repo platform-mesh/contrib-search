@@ -46,12 +46,12 @@ func NewSearchIndexReconciler(
 	mcMgr mcmanager.Manager,
 	osClient *opensearch.Client,
 	staticIndexPrefix string,
-	semanticModelID string,
+	semanticModels *opensearch.SemanticModelResolver,
 ) *SearchIndexReconciler {
 	return &SearchIndexReconciler{
 		log: log,
 		mclifecycle: builder.NewBuilder("searchindex", "SearchIndexReconciler", []lifecyclesubroutine.Subroutine{
-			subroutine.NewIndexLifecycleSubroutine(mcMgr, osClient, staticIndexPrefix, semanticModelID),
+			subroutine.NewIndexLifecycleSubroutine(mcMgr, osClient, staticIndexPrefix, semanticModels),
 		}, log).BuildMultiCluster(mcMgr),
 	}
 }

@@ -42,7 +42,7 @@ type IndexLifecycleSubroutine struct {
 	mgr               mcmanager.Manager
 	osClient          *opensearch.Client
 	staticIndexPrefix string
-	semanticModelID   string
+	semanticModels    *opensearch.SemanticModelResolver
 }
 
 // NewIndexLifecycleSubroutine creates a new index lifecycle subroutine
@@ -50,13 +50,13 @@ func NewIndexLifecycleSubroutine(
 	mgr mcmanager.Manager,
 	osClient *opensearch.Client,
 	staticIndexPrefix string,
-	semanticModelID string,
+	semanticModels *opensearch.SemanticModelResolver,
 ) *IndexLifecycleSubroutine {
 	return &IndexLifecycleSubroutine{
 		mgr:               mgr,
 		osClient:          osClient,
 		staticIndexPrefix: normalizePrefix(staticIndexPrefix),
-		semanticModelID:   strings.TrimSpace(semanticModelID),
+		semanticModels:    semanticModels,
 	}
 }
 
@@ -157,12 +157,20 @@ func (s *IndexLifecycleSubroutine) Process(ctx context.Context, instance runtime
 	created := false
 	replicasUpdated := false
 	if !desiredExists && !legacyExists {
+		var models opensearch.SemanticModels
+		if len(searchIndex.Spec.SemanticFields) > 0 && s.semanticModels != nil {
+			// Retried: the models may still be registering or deploying.
+			models, err = s.semanticModels.Resolve(ctx)
+			if err != nil {
+				return ctrl.Result{}, errors.NewOperatorError(fmt.Errorf("failed to resolve semantic models for %q: %w", desiredIndexName, err), true, false)
+			}
+		}
 		mapping, err := opensearch.DefaultIndexMapping(opensearch.FieldMappings{
 			Default:      searchIndex.Spec.DefaultFields,
 			DefaultTypes: searchIndex.Spec.DefaultFieldTypes,
 			Semantic:     searchIndex.Spec.SemanticFields,
 			Filterable:   searchIndex.Spec.FilterableFields,
-		}, s.semanticModelID)
+		}, models)
 		if err != nil {
 			return ctrl.Result{}, errors.NewOperatorError(fmt.Errorf("failed to build index mapping for %q: %w", desiredIndexName, err), false, false)
 		}
