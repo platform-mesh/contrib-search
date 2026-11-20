@@ -59,6 +59,15 @@ spec:
           {{- if .Values.opensearch.semanticModelId }}
           - --opensearch-semantic-model-id={{ .Values.opensearch.semanticModelId }}
           {{- end }}
+          {{- if .Values.opensearch.semanticModelName }}
+          - --opensearch-semantic-model-name={{ .Values.opensearch.semanticModelName }}
+          {{- end }}
+          {{- if .Values.opensearch.semanticSearchModelId }}
+          - --opensearch-semantic-search-model-id={{ .Values.opensearch.semanticSearchModelId }}
+          {{- end }}
+          {{- if .Values.opensearch.semanticSearchModelName }}
+          - --opensearch-semantic-search-model-name={{ .Values.opensearch.semanticSearchModelName }}
+          {{- end }}
           {{- if .Values.opensearch.indexNamePrefix }}
           - --opensearch-index-name-prefix={{ .Values.opensearch.indexNamePrefix }}
           {{- end }}

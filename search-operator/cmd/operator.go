@@ -115,8 +115,22 @@ func RunController(_ *cobra.Command, _ []string) { // coverage-ignore
 	}
 	log.Info().Msg("OpenSearch client connected successfully")
 
+	if err := operatorCfg.ValidateSemanticModels(); err != nil {
+		log.Fatal().Err(err).Msg("invalid semantic model configuration")
+	}
+	semanticModels := opensearch.NewSemanticModelResolver(osClient,
+		opensearch.ModelRef{
+			ID:   operatorCfg.OpenSearchSemanticModelID,
+			Name: operatorCfg.OpenSearchSemanticModelName,
+		},
+		opensearch.ModelRef{
+			ID:   operatorCfg.OpenSearchSemanticSearchModelID,
+			Name: operatorCfg.OpenSearchSemanticSearchModelName,
+		},
+	)
+
 	if err := controller.NewSearchIndexReconciler(
-		log, mgr, osClient, operatorCfg.OpenSearchIndexNamePrefix, operatorCfg.OpenSearchSemanticModelID,
+		log, mgr, osClient, operatorCfg.OpenSearchIndexNamePrefix, semanticModels,
 	).SetupWithManager(mgr, defaultCfg.MaxConcurrentReconciles); err != nil {
 		log.Fatal().Err(err).Str("controller", "SearchIndex").Msg("unable to create controller")
 	}

@@ -168,7 +168,7 @@ Fields present in a resource's schema are classified into three auto-populated l
 | `filterableFields` | Exact-match filtering and aggregations (facets) | all fields with scalar schema types | `keyword` |
 
 
-`semanticFields` are implemented using OpenSearch's `semantic` field type. The search-operator creates explicit semantic mappings for each configured field and supplies the configured `OPENSEARCH_SEMANTIC_MODEL_ID`. OpenSearch then manages the backing semantic metadata and embedding storage internally.
+`semanticFields` are implemented using OpenSearch's `semantic` field type. The search-operator creates explicit semantic mappings for each configured field and supplies the configured model as `model_id`, plus an optional query-time model as `search_model_id` (e.g. a tokenizer for a document-only sparse encoder). Models are configured by ID (`--opensearch-semantic-model-id`, `--opensearch-semantic-search-model-id`) or by name (`--opensearch-semantic-model-name`, `--opensearch-semantic-search-model-name`); names are resolved to the ID of the deployed model when the first index with semantic fields is created, and that reconcile is retried until the model is deployed. OpenSearch then manages the backing semantic metadata and embedding storage internally.
 
 #### Index Naming
 

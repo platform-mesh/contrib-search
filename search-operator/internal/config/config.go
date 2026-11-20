@@ -34,7 +34,13 @@ type OperatorConfig struct {
 	OpenSearchPassword         string
 	OpenSearchInsecure         bool
 	OpenSearchIndexNamePrefix  string
-	OpenSearchSemanticModelID  string
+	// Semantic field models, each set either by ID or by name. A name is
+	// resolved to the ID of the deployed model when the first index with
+	// semantic fields is created.
+	OpenSearchSemanticModelID         string
+	OpenSearchSemanticModelName       string
+	OpenSearchSemanticSearchModelID   string
+	OpenSearchSemanticSearchModelName string
 }
 
 func NewOperatorConfig() OperatorConfig {
@@ -88,5 +94,26 @@ func (c *OperatorConfig) AddFlags(fs *pflag.FlagSet) {
 	fs.BoolVar(&c.OpenSearchInsecure, "opensearch-insecure", c.OpenSearchInsecure, "Skip TLS certificate verification for OpenSearch (development only)")
 	fs.StringVar(&c.OpenSearchIndexNamePrefix, "opensearch-index-name-prefix", c.OpenSearchIndexNamePrefix, "Static prefix for all operator-managed OpenSearch index names and aliases")
 	fs.StringVar(&c.OpenSearchSemanticModelID, "opensearch-semantic-model-id", c.OpenSearchSemanticModelID, "OpenSearch ML model ID used for semantic field mappings (optional)")
+	fs.StringVar(&c.OpenSearchSemanticModelName, "opensearch-semantic-model-name", c.OpenSearchSemanticModelName, "Name of the deployed OpenSearch ML model used for semantic field mappings; alternative to --opensearch-semantic-model-id (optional)")
+	fs.StringVar(&c.OpenSearchSemanticSearchModelID, "opensearch-semantic-search-model-id", c.OpenSearchSemanticSearchModelID, "OpenSearch ML model ID used for semantic queries only, set as search_model_id (optional)")
+	fs.StringVar(&c.OpenSearchSemanticSearchModelName, "opensearch-semantic-search-model-name", c.OpenSearchSemanticSearchModelName, "Name of the deployed OpenSearch ML model used for semantic queries only; alternative to --opensearch-semantic-search-model-id (optional)")
 	fs.Var(&gvkSliceValue{cfg: c}, "searchable-resources", "Comma-separated list of GroupVersionKind values to index, each in group/version/kind format (repeatable)")
+}
+
+// ValidateSemanticModels checks that each semantic model is configured by ID or
+// by name, but not both, and that a search model is only set with a model.
+func (c *OperatorConfig) ValidateSemanticModels() error {
+	set := func(s string) bool { return strings.TrimSpace(s) != "" }
+	if set(c.OpenSearchSemanticModelID) && set(c.OpenSearchSemanticModelName) {
+		return fmt.Errorf("--opensearch-semantic-model-id and --opensearch-semantic-model-name are mutually exclusive")
+	}
+	if set(c.OpenSearchSemanticSearchModelID) && set(c.OpenSearchSemanticSearchModelName) {
+		return fmt.Errorf("--opensearch-semantic-search-model-id and --opensearch-semantic-search-model-name are mutually exclusive")
+	}
+	hasModel := set(c.OpenSearchSemanticModelID) || set(c.OpenSearchSemanticModelName)
+	hasSearchModel := set(c.OpenSearchSemanticSearchModelID) || set(c.OpenSearchSemanticSearchModelName)
+	if hasSearchModel && !hasModel {
+		return fmt.Errorf("a semantic search model requires --opensearch-semantic-model-id or --opensearch-semantic-model-name")
+	}
+	return nil
 }

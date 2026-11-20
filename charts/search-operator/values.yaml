@@ -34,8 +34,14 @@ opensearch:
   passwordSecretKey: "password"
   # -- Skip TLS verification for OpenSearch connections
   insecure: false
-  # -- OpenSearch ML model ID used for semantic field mappings
+  # -- OpenSearch ML model ID used for semantic field mappings (mutually exclusive with semanticModelName)
   semanticModelId: ""
+  # -- Name of the deployed OpenSearch ML model used for semantic field mappings, resolved to its ID at runtime
+  semanticModelName: ""
+  # -- OpenSearch ML model ID used for semantic queries only, set as search_model_id (mutually exclusive with semanticSearchModelName)
+  semanticSearchModelId: ""
+  # -- Name of the deployed OpenSearch ML model used for semantic queries only, resolved to its ID at runtime
+  semanticSearchModelName: ""
   # -- Static prefix for all operator-managed OpenSearch index names and aliases
   indexNamePrefix: ""
 

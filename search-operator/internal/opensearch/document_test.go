@@ -25,7 +25,7 @@ import (
 )
 
 func TestDefaultIndexMappingIsValidJSON(t *testing.T) {
-	mapping, err := DefaultIndexMapping(FieldMappings{}, "")
+	mapping, err := DefaultIndexMapping(FieldMappings{}, SemanticModels{})
 	if err != nil {
 		t.Fatalf("DefaultIndexMapping() returned error: %v", err)
 	}
@@ -35,10 +35,10 @@ func TestDefaultIndexMappingIsValidJSON(t *testing.T) {
 	}
 }
 
-func mappingProperties(t *testing.T, fields FieldMappings, semanticModelID string) (map[string]any, map[string]any) {
+func mappingProperties(t *testing.T, fields FieldMappings, models SemanticModels) (map[string]any, map[string]any) {
 	t.Helper()
 
-	mapping, err := DefaultIndexMapping(fields, semanticModelID)
+	mapping, err := DefaultIndexMapping(fields, models)
 	if err != nil {
 		t.Fatalf("DefaultIndexMapping() returned error: %v", err)
 	}
@@ -70,7 +70,7 @@ func leafAt(t *testing.T, properties map[string]any, section, fieldPath string) 
 }
 
 func TestDefaultIndexMappingIncludesSemanticFields(t *testing.T) {
-	_, properties := mappingProperties(t, FieldMappings{Semantic: []string{"description", "spec.summary"}}, "model-123")
+	_, properties := mappingProperties(t, FieldMappings{Semantic: []string{"description", "spec.summary"}}, SemanticModels{ModelID: "model-123"})
 
 	for _, fieldPath := range []string{"description", "spec.summary"} {
 		leaf := leafAt(t, properties, "semantic_fields", fieldPath)
@@ -88,13 +88,13 @@ func TestDefaultIndexMappingIncludesSemanticFields(t *testing.T) {
 }
 
 func TestDefaultIndexMappingRequiresSemanticModelID(t *testing.T) {
-	if _, err := DefaultIndexMapping(FieldMappings{Semantic: []string{"description"}}, ""); err == nil {
+	if _, err := DefaultIndexMapping(FieldMappings{Semantic: []string{"description"}}, SemanticModels{}); err == nil {
 		t.Fatal("DefaultIndexMapping() error = nil, want semantic model id validation error")
 	}
 }
 
 func TestDefaultIndexMappingIncludesFilterableFields(t *testing.T) {
-	_, properties := mappingProperties(t, FieldMappings{Filterable: []string{"status.phase"}}, "")
+	_, properties := mappingProperties(t, FieldMappings{Filterable: []string{"status.phase"}}, SemanticModels{})
 
 	if got := leafAt(t, properties, "filterable_fields", "status.phase")["type"]; got != "keyword" {
 		t.Fatalf("filterable_fields.status.phase type = %v, want keyword", got)
@@ -114,7 +114,7 @@ func TestDefaultIndexMappingTypesDefaultFields(t *testing.T) {
 			"spec.enabled":               pmsearchv1alpha1.FieldTypeBoolean,
 			"metadata.creationTimestamp": pmsearchv1alpha1.FieldTypeDate,
 		},
-	}, "")
+	}, SemanticModels{})
 
 	tests := []struct {
 		path     string
@@ -157,7 +157,7 @@ func TestDefaultIndexMappingTypesDefaultFields(t *testing.T) {
 }
 
 func TestDefaultIndexMappingIndexesUntypedDefaultFieldsAsText(t *testing.T) {
-	js, _ := mappingProperties(t, FieldMappings{}, "")
+	js, _ := mappingProperties(t, FieldMappings{}, SemanticModels{})
 
 	if got := js["date_detection"]; got != false {
 		t.Fatalf("date_detection = %v, want false", got)
@@ -194,7 +194,7 @@ func TestDefaultIndexMappingKeepsSectionsApart(t *testing.T) {
 		DefaultTypes: map[string]pmsearchv1alpha1.FieldType{"spec.title": pmsearchv1alpha1.FieldTypeString},
 		Semantic:     []string{"spec.title"},
 		Filterable:   []string{"spec.title"},
-	}, "model-123")
+	}, SemanticModels{ModelID: "model-123"})
 
 	for section, want := range map[string]string{"default_fields": "text", "semantic_fields": "semantic", "filterable_fields": "keyword"} {
 		if got := leafAt(t, properties, section, "spec.title")["type"]; got != want {
@@ -243,5 +243,29 @@ func TestSetDefaultFilterableFieldsPreservesConfiguredFields(t *testing.T) {
 	}
 	if got := doc.FilterableFields["kind"]; got != "ConfigMap" {
 		t.Errorf("FilterableFields[kind] = %v, want ConfigMap", got)
+	}
+}
+
+func TestDefaultIndexMappingSetsSemanticSearchModelID(t *testing.T) {
+	tests := []struct {
+		name   string
+		models SemanticModels
+		want   any
+	}{
+		{name: "with search model", models: SemanticModels{ModelID: "doc-model", SearchModelID: "tokenizer"}, want: "tokenizer"},
+		{name: "without search model", models: SemanticModels{ModelID: "doc-model"}, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, properties := mappingProperties(t, FieldMappings{Semantic: []string{"spec.summary"}}, tt.models)
+
+			leaf := leafAt(t, properties, "semantic_fields", "spec.summary")
+			if got := leaf["model_id"]; got != "doc-model" {
+				t.Fatalf("model_id = %v, want doc-model", got)
+			}
+			if got := leaf["search_model_id"]; got != tt.want {
+				t.Fatalf("search_model_id = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

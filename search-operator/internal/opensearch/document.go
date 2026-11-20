@@ -58,7 +58,7 @@ const sortNormalizer = "sort_normalizer"
 // Typed default fields are mapped from their schema type. Everything else under
 // default_fields (untyped paths and the contents of maps and objects) is mapped
 // as text, so the first document cannot fix a type that later values break.
-func DefaultIndexMapping(fields FieldMappings, semanticModelID string) (string, error) {
+func DefaultIndexMapping(fields FieldMappings, models SemanticModels) (string, error) {
 	defaultProperties := map[string]any{}
 	filterableProperties := map[string]any{}
 	semanticProperties := map[string]any{}
@@ -133,12 +133,16 @@ func DefaultIndexMapping(fields FieldMappings, semanticModelID string) (string, 
 	}
 
 	if len(fields.Semantic) > 0 {
-		semanticModelID = strings.TrimSpace(semanticModelID)
-		if semanticModelID == "" {
+		modelID := strings.TrimSpace(models.ModelID)
+		if modelID == "" {
 			return "", fmt.Errorf("semantic model id is required when semantic fields are configured")
 		}
+		searchModelID := strings.TrimSpace(models.SearchModelID)
 		for _, fieldPath := range fields.Semantic {
-			leaf := map[string]any{"type": "semantic", "model_id": semanticModelID}
+			leaf := map[string]any{"type": "semantic", "model_id": modelID}
+			if searchModelID != "" {
+				leaf["search_model_id"] = searchModelID
+			}
 			if err := setLeafMapping(semanticProperties, fieldPath, leaf, true); err != nil {
 				return "", err
 			}
